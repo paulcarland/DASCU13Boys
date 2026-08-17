@@ -267,40 +267,41 @@ function ExportButton({ onExport, label = "Export PDF", className = "" }) {
 /* ---------------------------------------------------------------
    Balance math
 ---------------------------------------------------------------- */
+function buildLedger(players, transactions) {
+  const byPlayer = {};
+  for (const p of players) byPlayer[p.id] = [];
+  for (const t of transactions) if (byPlayer[t.playerId]) byPlayer[t.playerId].push(t);
+  for (const id in byPlayer) byPlayer[id].sort((a, b) => a.date.localeCompare(b.date));
+
+  const currentBalance = (playerId) => {
+    const p = players.find((pl) => pl.id === playerId);
+    if (!p) return 0;
+    let bal = Number(p.openingBalance) || 0;
+    for (const t of byPlayer[playerId] || []) bal += t.direction === "credit" ? t.amount : -t.amount;
+    return bal;
+  };
+
+  const monthStats = (playerId, monthStr) => {
+    const p = players.find((pl) => pl.id === playerId);
+    let beginning = Number(p?.openingBalance) || 0;
+    const inMonth = [];
+    for (const t of byPlayer[playerId] || []) {
+      const tMonth = t.date.slice(0, 7);
+      if (tMonth < monthStr) beginning += t.direction === "credit" ? t.amount : -t.amount;
+      else if (tMonth === monthStr) inMonth.push(t);
+    }
+    let debits = 0, credits = 0, running = beginning;
+    const rows = inMonth.map((t) => {
+      running += t.direction === "credit" ? t.amount : -t.amount;
+      if (t.direction === "debit") debits += t.amount; else credits += t.amount;
+      return { ...t, running };
+    });
+    return { beginning, debits, credits, ending: beginning + credits - debits, rows };
+  };
+  return { currentBalance, monthStats };
+}
 function useLedger(players, transactions) {
-  return useMemo(() => {
-    const byPlayer = {};
-    for (const p of players) byPlayer[p.id] = [];
-    for (const t of transactions) if (byPlayer[t.playerId]) byPlayer[t.playerId].push(t);
-    for (const id in byPlayer) byPlayer[id].sort((a, b) => a.date.localeCompare(b.date));
-
-    const currentBalance = (playerId) => {
-      const p = players.find((pl) => pl.id === playerId);
-      if (!p) return 0;
-      let bal = Number(p.openingBalance) || 0;
-      for (const t of byPlayer[playerId] || []) bal += t.direction === "credit" ? t.amount : -t.amount;
-      return bal;
-    };
-
-    const monthStats = (playerId, monthStr) => {
-      const p = players.find((pl) => pl.id === playerId);
-      let beginning = Number(p?.openingBalance) || 0;
-      const inMonth = [];
-      for (const t of byPlayer[playerId] || []) {
-        const tMonth = t.date.slice(0, 7);
-        if (tMonth < monthStr) beginning += t.direction === "credit" ? t.amount : -t.amount;
-        else if (tMonth === monthStr) inMonth.push(t);
-      }
-      let debits = 0, credits = 0, running = beginning;
-      const rows = inMonth.map((t) => {
-        running += t.direction === "credit" ? t.amount : -t.amount;
-        if (t.direction === "debit") debits += t.amount; else credits += t.amount;
-        return { ...t, running };
-      });
-      return { beginning, debits, credits, ending: beginning + credits - debits, rows };
-    };
-    return { currentBalance, monthStats };
-  }, [players, transactions]);
+  return useMemo(() => buildLedger(players, transactions), [players, transactions]);
 }
 
 /* ---------------------------------------------------------------
@@ -628,7 +629,7 @@ function RosterTab({ teamName, players, ledger, addPlayer, addPlayersBulk, updat
 /* ---------------------------------------------------------------
    Admin: Transactions tab
 ---------------------------------------------------------------- */
-function TransactionsTab({ teamName, players, transactions, addTxn, addBulkTxn, deleteTxn, presetPlayerId }) {
+function TransactionsTab({ teamName, players, transactions, addTxn, addBulkTxn, deleteTxn, updateTxn, presetPlayerId }) {
   const [mode, setMode] = useState("single");
   const [form, setForm] = useState({ playerId: presetPlayerId || (players[0]?.id ?? ""), date: todayStr(), direction: "debit", category: DEBIT_CATEGORIES[0], amount: "", description: "" });
   const [bulkForm, setBulkForm] = useState({ date: todayStr(), direction: "debit", category: DEBIT_CATEGORIES[0], amount: "", description: "" });
@@ -646,6 +647,19 @@ function TransactionsTab({ teamName, players, transactions, addTxn, addBulkTxn, 
     if (!form.playerId || !form.amount || Number(form.amount) <= 0) return;
     await addTxn({ playerId: form.playerId, date: form.date, direction: form.direction, category: form.category, amount: parseFloat(form.amount), description: form.description.trim(), createdAt: Date.now() });
     setForm({ ...form, amount: "", description: "" });
+  };
+
+  const [editingTxnId, setEditingTxnId] = useState(null);
+  const [editTxnForm, setEditTxnForm] = useState(null);
+  const editTxnCats = editTxnForm?.direction === "debit" ? DEBIT_CATEGORIES : CREDIT_CATEGORIES;
+  const startEditTxn = (t) => {
+    setEditingTxnId(t.id);
+    setEditTxnForm({ playerId: t.playerId, date: t.date, direction: t.direction, category: t.category, amount: String(t.amount), description: t.description || "" });
+  };
+  const saveEditTxn = async () => {
+    if (!editTxnForm.playerId || !editTxnForm.amount || Number(editTxnForm.amount) <= 0) return;
+    await updateTxn(editingTxnId, { playerId: editTxnForm.playerId, date: editTxnForm.date, direction: editTxnForm.direction, category: editTxnForm.category, amount: parseFloat(editTxnForm.amount), description: editTxnForm.description.trim() });
+    setEditingTxnId(null); setEditTxnForm(null);
   };
 
   const bulkFiltered = players.filter((p) => p.name.toLowerCase().includes(bulkQuery.toLowerCase()));
@@ -733,6 +747,23 @@ function TransactionsTab({ teamName, players, transactions, addTxn, addBulkTxn, 
           </div>
         </>)}
       </div>
+      {editingTxnId && editTxnForm && (
+        <div className="rounded-2xl p-5 mb-5" style={{ background: C.surface, border: `1px solid ${C.pitch}` }}>
+          <p className="font-black mb-3" style={{ color: C.ink }}>Edit transaction</p>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <Field label="Player"><Select value={editTxnForm.playerId} onChange={(e) => setEditTxnForm({ ...editTxnForm, playerId: e.target.value })}>{players.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
+            <Field label="Date"><TextInput type="date" value={editTxnForm.date} onChange={(e) => setEditTxnForm({ ...editTxnForm, date: e.target.value })} /></Field>
+            <Field label="Type"><div className="flex rounded-lg overflow-hidden" style={{ border: `1px solid ${C.line}` }}>
+              <button onClick={() => setEditTxnForm({ ...editTxnForm, direction: "debit", category: DEBIT_CATEGORIES[0] })} className="flex-1 py-2 text-sm font-semibold" style={{ background: editTxnForm.direction === "debit" ? C.debitTint : "transparent", color: editTxnForm.direction === "debit" ? C.debit : C.inkSoft }}>Charge</button>
+              <button onClick={() => setEditTxnForm({ ...editTxnForm, direction: "credit", category: CREDIT_CATEGORIES[0] })} className="flex-1 py-2 text-sm font-semibold" style={{ background: editTxnForm.direction === "credit" ? C.creditTint : "transparent", color: editTxnForm.direction === "credit" ? C.credit : C.inkSoft }}>Payment</button>
+            </div></Field>
+            <Field label="Category"><Select value={editTxnForm.category} onChange={(e) => setEditTxnForm({ ...editTxnForm, category: e.target.value })}>{editTxnCats.map((c) => <option key={c} value={c}>{c}</option>)}</Select></Field>
+            <Field label="Amount"><TextInput type="number" step="0.01" min="0" value={editTxnForm.amount} onChange={(e) => setEditTxnForm({ ...editTxnForm, amount: e.target.value })} /></Field>
+            <Field label="Description (optional)"><TextInput value={editTxnForm.description} onChange={(e) => setEditTxnForm({ ...editTxnForm, description: e.target.value })} /></Field>
+          </div>
+          <div className="flex gap-2 mt-4"><Button onClick={saveEditTxn}>✓ Save changes</Button><Button variant="ghost" onClick={() => { setEditingTxnId(null); setEditTxnForm(null); }}>Cancel</Button></div>
+        </div>
+      )}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <Select value={filterPlayer} onChange={(e) => setFilterPlayer(e.target.value)} className="w-auto"><option value="all">All players</option>{players.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
         <input type="month" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} style={inputStyle} className={`${inputClass} w-auto`} />
@@ -749,7 +780,10 @@ function TransactionsTab({ teamName, players, transactions, addTxn, addBulkTxn, 
                 <td className="px-4 py-3"><span className="text-xs font-semibold px-2 py-1 rounded-full" style={{ background: t.direction === "debit" ? C.debitTint : C.creditTint, color: t.direction === "debit" ? C.debit : C.credit }}>{t.category}</span></td>
                 <td className="px-4 py-3" style={{ color: C.inkSoft }}>{t.description || "—"}</td>
                 <td className="px-4 py-3 text-right font-bold" style={{ color: t.direction === "debit" ? C.debit : C.credit, fontVariantNumeric: "tabular-nums" }}>{t.direction === "debit" ? "−" : "+"}{fmtMoney(t.amount)}</td>
-                <td className="px-4 py-3 text-right"><button onClick={() => { if (confirm("Delete this transaction?")) deleteTxn(t.id); }} style={{ color: C.inkSoft }}>🗑</button></td>
+                <td className="px-4 py-3 text-right"><div className="flex items-center justify-end gap-3">
+                  <button onClick={() => startEditTxn(t)} className="text-xs font-semibold" style={{ color: C.pitchDark }}>Edit</button>
+                  <button onClick={() => { if (confirm("Delete this transaction?")) deleteTxn(t.id); }} style={{ color: C.inkSoft }}>🗑</button>
+                </div></td>
               </tr>
             ))}</tbody>
           </table>
@@ -814,9 +848,103 @@ function StatementsTab({ teamName, players, ledger, initialPlayerId, onConsumedI
 }
 
 /* ---------------------------------------------------------------
+   Admin: Seasons (archive) panel
+---------------------------------------------------------------- */
+function SeasonsPanel({ teamName, players, transactions, onArchiveSeason }) {
+  const [archives, setArchives] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [label, setLabel] = useState("");
+  const [carryForward, setCarryForward] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
+
+  const loadArchives = async () => {
+    setLoading(true);
+    try {
+      const snap = await window.db.collection("archives").orderBy("archivedAt", "desc").get();
+      setArchives(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    } catch (e) { setArchives([]); }
+    setLoading(false);
+  };
+  useEffect(() => { loadArchives(); }, []);
+
+  const confirmArchive = async () => {
+    if (!confirm(`This moves all ${players.length} players and ${transactions.length} transactions into a permanent "${label.trim() || "Season archive"}" record, then clears the live transaction list${carryForward ? " (each player's current balance becomes their new opening balance)" : " and resets every player's balance to zero"}. This cannot be undone. Continue?`)) return;
+    setBusy(true); setMsg("");
+    try {
+      await onArchiveSeason(label, carryForward);
+      setMsg("Season archived — the live roster now starts fresh.");
+      setLabel(""); setShowForm(false);
+      await loadArchives();
+    } catch (e) { setMsg("Something went wrong — please try again."); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="rounded-2xl p-5" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+      <p className="font-black mb-2" style={{ color: C.ink }}>Seasons</p>
+      <p className="text-sm mb-3" style={{ color: C.inkSoft }}>Close out a season by moving its transaction history into a permanent, read-only record — the live roster and balances start clean for the next one. Players stay on the roster; only the transaction ledger and balances reset.</p>
+
+      {!showForm ? (
+        <Button variant="ghost" onClick={() => setShowForm(true)}>+ Archive current season</Button>
+      ) : (
+        <div className="rounded-xl p-4 mb-2" style={{ background: C.lineSoft }}>
+          <Field label="Season label" hint='e.g. "2025–2026 Fall Season"'>
+            <TextInput value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Season label" />
+          </Field>
+          <label className="flex items-center gap-2 mt-3 text-sm" style={{ color: C.ink }}>
+            <input type="checkbox" checked={carryForward} onChange={(e) => setCarryForward(e.target.checked)} />
+            Carry forward each player's current balance as their new opening balance
+          </label>
+          <div className="flex items-center gap-3 mt-4 flex-wrap">
+            <Button variant="danger" disabled={busy} onClick={confirmArchive}>{busy ? <Spinner size={14} /> : "📦"} Archive & start fresh</Button>
+            <Button variant="ghost" onClick={() => { setShowForm(false); setLabel(""); }}>Cancel</Button>
+          </div>
+        </div>
+      )}
+      {msg && <p className="text-sm font-semibold mt-2 mb-2" style={{ color: C.pitchDark }}>{msg}</p>}
+
+      <div className="mt-5 pt-5" style={{ borderTop: `1px solid ${C.lineSoft}` }}>
+        <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: C.inkSoft }}>Past seasons</p>
+        {loading ? <Spinner size={16} /> : archives.length === 0 ? (
+          <p className="text-sm" style={{ color: C.inkSoft }}>No archived seasons yet.</p>
+        ) : (
+          <div className="grid gap-2">
+            {archives.map((a) => {
+              const archivePlayers = a.players || [];
+              const archiveTransactions = a.transactions || [];
+              const archiveLedger = buildLedger(archivePlayers, archiveTransactions);
+              return (
+                <div key={a.id} className="rounded-xl p-3" style={{ border: `1px solid ${C.line}` }}>
+                  <button onClick={() => setExpandedId(expandedId === a.id ? null : a.id)} className="w-full flex items-center justify-between text-left">
+                    <div>
+                      <p className="font-bold text-sm" style={{ color: C.ink }}>{a.label}</p>
+                      <p className="text-xs" style={{ color: C.inkSoft }}>Archived {new Date(a.archivedAt).toLocaleDateString()} · {archivePlayers.length} players · {archiveTransactions.length} transactions</p>
+                    </div>
+                    <span style={{ color: C.inkSoft }}>{expandedId === a.id ? "▾" : "›"}</span>
+                  </button>
+                  {expandedId === a.id && (
+                    <div className="flex items-center gap-3 mt-3 pt-3 flex-wrap" style={{ borderTop: `1px solid ${C.lineSoft}` }}>
+                      <ExportButton label="Roster PDF" onExport={() => exportRosterPDF(a.teamName || teamName, archivePlayers, archiveLedger)} />
+                      <Button variant="ghost" onClick={() => downloadBackupJSON(a.label, archivePlayers, archiveTransactions)}>⬇ Download JSON</Button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------
    Admin: Settings tab
 ---------------------------------------------------------------- */
-function SettingsTab({ teamName, setTeamName, players, transactions, onChangePin, onResetAll, onRestoreBackup }) {
+function SettingsTab({ teamName, setTeamName, players, transactions, onChangePin, onResetAll, onRestoreBackup, onArchiveSeason }) {
   const [name, setName] = useState(teamName);
   useEffect(() => setName(teamName), [teamName]);
 
@@ -886,6 +1014,7 @@ function SettingsTab({ teamName, setTeamName, players, transactions, onChangePin
           {restoreMsg && <p className="text-sm font-semibold mt-2" style={{ color: C.pitchDark }}>{restoreMsg}</p>}
         </div>
       </div>
+      <SeasonsPanel teamName={teamName} players={players} transactions={transactions} onArchiveSeason={onArchiveSeason} />
       <div className="rounded-2xl p-5" style={{ background: C.debitTint, border: `1px solid ${C.line}` }}>
         <p className="font-black mb-2" style={{ color: C.debit }}>Reset all data</p>
         <p className="text-sm mb-3" style={{ color: C.inkSoft }}>Permanently erases every player and transaction. This cannot be undone.</p>
@@ -900,14 +1029,90 @@ function SettingsTab({ teamName, setTeamName, players, transactions, onChangePin
 }
 
 /* ---------------------------------------------------------------
+   Admin: Dashboard tab
+---------------------------------------------------------------- */
+function DashboardTab({ players, transactions, ledger, onOpenStatement }) {
+  const stats = useMemo(() => {
+    let totalOwed = 0, totalCredit = 0;
+    const numberOf = players.reduce((acc, p, idx) => (acc[p.id] = idx + 1, acc), {});
+    const balances = players.map((p) => ({ player: p, balance: ledger.currentBalance(p.id) }));
+    balances.forEach(({ balance }) => { if (balance < -0.004) totalOwed += -balance; else if (balance > 0.004) totalCredit += balance; });
+    const owing = balances.filter((b) => b.balance < -0.004).sort((a, b) => a.balance - b.balance).slice(0, 8);
+    const thisMonth = thisMonthStr();
+    let monthCharged = 0, monthCollected = 0;
+    transactions.forEach((t) => { if (t.date.slice(0, 7) === thisMonth) { if (t.direction === "debit") monthCharged += t.amount; else monthCollected += t.amount; } });
+    const recent = [...transactions].sort((a, b) => (b.date + b.createdAt).localeCompare(a.date + a.createdAt)).slice(0, 8);
+    return { totalOwed, totalCredit, owing, monthCharged, monthCollected, recent, numberOf, activeCount: players.filter((p) => p.active).length };
+  }, [players, transactions, ledger]);
+
+  const playerName = (id) => players.find((p) => p.id === id)?.name || "—";
+
+  return (
+    <div>
+      <div className="grid sm:grid-cols-4 gap-3 mb-5">
+        <div className="rounded-2xl p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.inkSoft }}>Active players</p>
+          <p className="text-2xl font-black" style={{ color: C.ink }}>{stats.activeCount}</p>
+        </div>
+        <div className="rounded-2xl p-4" style={{ background: C.debitTint }}>
+          <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.debit }}>Total outstanding</p>
+          <p className="text-2xl font-black" style={{ color: C.debit }}>{fmtMoney(stats.totalOwed)}</p>
+        </div>
+        <div className="rounded-2xl p-4" style={{ background: C.creditTint }}>
+          <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.credit }}>Credit on file</p>
+          <p className="text-2xl font-black" style={{ color: C.credit }}>{fmtMoney(stats.totalCredit)}</p>
+        </div>
+        <div className="rounded-2xl p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.inkSoft }}>Collected this month</p>
+          <p className="text-2xl font-black" style={{ color: C.ink }}>{fmtMoney(stats.monthCollected)}</p>
+          <p className="text-xs mt-1" style={{ color: C.inkSoft }}>{fmtMoney(stats.monthCharged)} charged</p>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-5">
+        <div className="rounded-2xl p-5" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <p className="font-black mb-3" style={{ color: C.ink }}>Players with a balance due</p>
+          {stats.owing.length === 0 ? <p className="text-sm" style={{ color: C.inkSoft }}>Nobody currently owes anything. 🎉</p> : (
+            <div className="grid gap-1">
+              {stats.owing.map(({ player, balance }) => (
+                <button key={player.id} onClick={() => onOpenStatement(player.id)} className="flex items-center justify-between py-2 px-1 rounded-lg hover:opacity-80" style={{ borderTop: `1px solid ${C.lineSoft}` }}>
+                  <span className="flex items-center gap-2.5 font-semibold text-sm" style={{ color: C.ink }}><JerseyBadge n={stats.numberOf[player.id]} /> {player.name}</span>
+                  <MoneyText value={balance} />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="rounded-2xl p-5" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <p className="font-black mb-3" style={{ color: C.ink }}>Recent activity</p>
+          {stats.recent.length === 0 ? <p className="text-sm" style={{ color: C.inkSoft }}>No transactions logged yet.</p> : (
+            <div className="grid gap-1">
+              {stats.recent.map((t) => (
+                <div key={t.id} className="flex items-center justify-between py-2 px-1 text-sm" style={{ borderTop: `1px solid ${C.lineSoft}` }}>
+                  <div>
+                    <p className="font-semibold" style={{ color: C.ink }}>{playerName(t.playerId)}</p>
+                    <p className="text-xs" style={{ color: C.inkSoft }}>{t.date} · {t.category}</p>
+                  </div>
+                  <span className="font-bold" style={{ color: t.direction === "debit" ? C.debit : C.credit }}>{t.direction === "debit" ? "−" : "+"}{fmtMoney(t.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------
    Admin shell
 ---------------------------------------------------------------- */
-function AdminShell({ teamName, setTeamName, players, transactions, addPlayer, addPlayersBulk, updatePlayer, deletePlayer, addTxn, addBulkTxn, deleteTxn, onLock, onResetAll, onRestoreBackup }) {
-  const [tab, setTab] = useState("roster");
+function AdminShell({ teamName, setTeamName, players, transactions, addPlayer, addPlayersBulk, updatePlayer, deletePlayer, addTxn, addBulkTxn, deleteTxn, updateTxn, onLock, onResetAll, onRestoreBackup, onArchiveSeason }) {
+  const [tab, setTab] = useState("dashboard");
   const [statementPlayerId, setStatementPlayerId] = useState(null);
   const [txnPresetPlayer] = useState(null);
   const ledger = useLedger(players, transactions);
-  const tabs = [["roster", "Roster"], ["transactions", "Transactions"], ["statements", "Statements"], ["settings", "Settings"]];
+  const tabs = [["dashboard", "Dashboard"], ["roster", "Roster"], ["transactions", "Transactions"], ["statements", "Statements"], ["settings", "Settings"]];
   return (
     <div style={{ background: C.bg, minHeight: "100vh" }}>
       <header className="flex items-center justify-between px-5 py-4 print:hidden" style={{ borderBottom: `1px solid ${C.line}` }}>
@@ -920,10 +1125,11 @@ function AdminShell({ teamName, setTeamName, players, transactions, addPlayer, a
         ))}
       </nav>
       <main className="p-5" style={{ borderTop: `1px solid ${C.line}` }}>
+        {tab === "dashboard" && <DashboardTab players={players} transactions={transactions} ledger={ledger} onOpenStatement={(id) => { setStatementPlayerId(id); setTab("statements"); }} />}
         {tab === "roster" && <RosterTab teamName={teamName} players={players} ledger={ledger} addPlayer={addPlayer} addPlayersBulk={addPlayersBulk} updatePlayer={updatePlayer} deletePlayer={deletePlayer} onOpenStatement={(id) => { setStatementPlayerId(id); setTab("statements"); }} />}
-        {tab === "transactions" && <TransactionsTab teamName={teamName} players={players} transactions={transactions} addTxn={addTxn} addBulkTxn={addBulkTxn} deleteTxn={deleteTxn} presetPlayerId={txnPresetPlayer} />}
+        {tab === "transactions" && <TransactionsTab teamName={teamName} players={players} transactions={transactions} addTxn={addTxn} addBulkTxn={addBulkTxn} deleteTxn={deleteTxn} updateTxn={updateTxn} presetPlayerId={txnPresetPlayer} />}
         {tab === "statements" && <StatementsTab teamName={teamName} players={players} ledger={ledger} initialPlayerId={statementPlayerId} onConsumedInitial={() => setStatementPlayerId(null)} />}
-        {tab === "settings" && <SettingsTab teamName={teamName} setTeamName={setTeamName} players={players} transactions={transactions} onChangePin={() => onLock(true)} onResetAll={onResetAll} onRestoreBackup={onRestoreBackup} />}
+        {tab === "settings" && <SettingsTab teamName={teamName} setTeamName={setTeamName} players={players} transactions={transactions} onChangePin={() => onLock(true)} onResetAll={onResetAll} onRestoreBackup={onRestoreBackup} onArchiveSeason={onArchiveSeason} />}
       </main>
     </div>
   );
@@ -1034,12 +1240,40 @@ function App() {
     }
   }, []);
   const deleteTxn = useCallback(async (id) => { await window.db.collection("transactions").doc(id).delete(); }, []);
+  const updateTxn = useCallback(async (id, patch) => { await window.db.collection("transactions").doc(id).update(patch); }, []);
   const setTeamName = useCallback(async (name) => { await window.db.collection("meta").doc("team").set({ teamName: name }, { merge: true }); }, []);
   const setPin = useCallback(async (p) => { await window.db.collection("meta").doc("admin").set({ pin: p }, { merge: true }); setPinState(p); }, []);
   const resetAll = useCallback(async () => {
     const ps = await window.db.collection("players").get(); await commitInChunks(ps);
     const ts = await window.db.collection("transactions").get(); await commitInChunks(ts);
   }, []);
+  const archiveSeason = useCallback(async (label, carryForward) => {
+    const snapshotPlayers = players.map((p) => ({ ...p }));
+    const snapshotTransactions = transactions.map((t) => ({ ...t }));
+    const balanceOf = (playerId) => {
+      const p = snapshotPlayers.find((pl) => pl.id === playerId);
+      let bal = Number(p?.openingBalance) || 0;
+      for (const t of snapshotTransactions) { if (t.playerId !== playerId) continue; bal += t.direction === "credit" ? t.amount : -t.amount; }
+      return bal;
+    };
+    await window.db.collection("archives").add({
+      label: label.trim() || `Season archived ${todayStr()}`,
+      archivedAt: new Date().toISOString(),
+      teamName,
+      players: snapshotPlayers,
+      transactions: snapshotTransactions,
+    });
+    const ts = await window.db.collection("transactions").get();
+    await commitInChunks(ts);
+    const playersCol = window.db.collection("players");
+    for (let i = 0; i < snapshotPlayers.length; i += 400) {
+      const batch = window.db.batch();
+      snapshotPlayers.slice(i, i + 400).forEach((p) => {
+        batch.update(playersCol.doc(p.id), { openingBalance: carryForward ? balanceOf(p.id) : 0 });
+      });
+      await batch.commit();
+    }
+  }, [teamName, players, transactions]);
   const restoreFromBackup = useCallback(async (backup) => {
     const ps = await window.db.collection("players").get(); await commitInChunks(ps);
     const ts = await window.db.collection("transactions").get(); await commitInChunks(ts);
@@ -1065,7 +1299,7 @@ function App() {
   let body;
   if (screen === "landing") body = <Landing teamName={teamName} onPickAdmin={() => setScreen("adminGate")} onPickParent={() => setScreen("parentGate")} />;
   else if (screen === "adminGate") body = <AdminGate pin={forceChangePin ? null : pin} onSetPin={async (p) => { await setPin(p); setForceChangePin(false); setScreen("admin"); }} onUnlock={() => setScreen("admin")} onBack={() => { setScreen("landing"); setForceChangePin(false); }} />;
-  else if (screen === "admin") body = <AdminShell teamName={teamName} setTeamName={setTeamName} players={players} transactions={transactions} addPlayer={addPlayer} addPlayersBulk={addPlayersBulk} updatePlayer={updatePlayer} deletePlayer={deletePlayer} addTxn={addTxn} addBulkTxn={addBulkTxn} deleteTxn={deleteTxn} onLock={(changePin) => { setScreen("adminGate"); setForceChangePin(!!changePin); }} onResetAll={resetAll} onRestoreBackup={restoreFromBackup} />;
+  else if (screen === "admin") body = <AdminShell teamName={teamName} setTeamName={setTeamName} players={players} transactions={transactions} addPlayer={addPlayer} addPlayersBulk={addPlayersBulk} updatePlayer={updatePlayer} deletePlayer={deletePlayer} addTxn={addTxn} addBulkTxn={addBulkTxn} deleteTxn={deleteTxn} updateTxn={updateTxn} onLock={(changePin) => { setScreen("adminGate"); setForceChangePin(!!changePin); }} onResetAll={resetAll} onRestoreBackup={restoreFromBackup} onArchiveSeason={archiveSeason} />;
   else if (screen === "parentGate") body = <ParentGate players={players} onVerified={(id) => { setParentPlayerId(id); setScreen("parent"); }} onBack={() => setScreen("landing")} />;
   else if (screen === "parent") body = <ParentView teamName={teamName} players={players} transactions={transactions} playerId={parentPlayerId} onLogout={() => { setParentPlayerId(null); setScreen("landing"); }} />;
 
