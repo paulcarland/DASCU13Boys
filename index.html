@@ -249,7 +249,7 @@ function Field({ label, children, hint }) {
 }
 const inputStyle = { border: `1px solid ${C.line}`, background: C.surface, color: C.ink };
 const inputClass = "w-full rounded-lg px-3 py-2 text-sm outline-none focus:ring-2";
-function TextInput(props) { return <input {...props} style={inputStyle} className={`${inputClass} ${props.className || ""}`} />; }
+function TextInput(props) { return <input {...props} style={{ ...inputStyle, ...props.style }} className={`${inputClass} ${props.className || ""}`} />; }
 function Select(props) { return <select {...props} style={inputStyle} className={`${inputClass} ${props.className || ""}`} />; }
 function Button({ children, variant = "primary", className = "", ...rest }) {
   const styles = {
@@ -1159,6 +1159,7 @@ function AdminShell({ teamName, setTeamName, players, transactions, addPlayer, a
 function ParentGate({ players, onVerified, onBack }) {
   const [name, setName] = useState(""); const [code, setCode] = useState(""); const [err, setErr] = useState("");
   const submit = () => {
+    if (!name.trim() || !code.trim()) { setErr("Enter your player's name and access code."); return; }
     const match = players.find((p) => p.name.trim().toLowerCase() === name.trim().toLowerCase() && p.accessCode === code.trim().toUpperCase());
     if (match) onVerified(match.id); else setErr("We couldn't find that player and code combination. Check with your team treasurer.");
   };
@@ -1170,9 +1171,9 @@ function ParentGate({ players, onVerified, onBack }) {
           <h2 className="font-black text-lg" style={{ color: C.ink }}>👥 Parent portal</h2>
           <p className="text-sm mt-1 mb-4" style={{ color: C.inkSoft }}>Enter your player's name exactly as registered, plus the access code from your treasurer.</p>
           <div className="grid gap-3">
-            <Field label="Player name"><TextInput value={name} onChange={(e) => { setName(e.target.value); setErr(""); }} placeholder="Full name" /></Field>
-            <Field label="Access code"><TextInput value={code} onChange={(e) => { setCode(e.target.value); setErr(""); }} placeholder="6-character code" onKeyDown={(e) => e.key === "Enter" && submit()} /></Field>
-            {err && <p className="text-xs font-semibold">{err}</p>}
+            <Field label="Player name"><TextInput value={name} onChange={(e) => { setName(e.target.value); setErr(""); }} placeholder="Full name" style={err ? { borderColor: C.debit } : undefined} /></Field>
+            <Field label="Access code"><TextInput value={code} onChange={(e) => { setCode(e.target.value); setErr(""); }} placeholder="6-character code" onKeyDown={(e) => e.key === "Enter" && submit()} style={err ? { borderColor: C.debit } : undefined} /></Field>
+            {err && <p className="text-xs font-semibold" style={{ color: C.debit }}>⚠ {err}</p>}
             <Button variant="dark" onClick={submit}>View account</Button>
           </div>
         </div>
