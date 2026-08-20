@@ -217,6 +217,16 @@ function downloadBackupJSON(teamName, players, transactions) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function buildAccessCodeMailto(teamName, player) {
+  const siteUrl = window.location.origin + window.location.pathname;
+  const greetingName = player.parentName ? player.parentName.split(" ")[0] : "there";
+  const subject = `${teamName} — Access code for ${player.name}`;
+  const body = `Hi ${greetingName},\n\nHere's your access to the ${teamName} parent portal for ${player.name}:\n\nPlayer name: ${player.name}\nAccess code: ${player.accessCode}\n\nVisit ${siteUrl} and choose "Parent portal," then enter the player name and code above to view ${player.name}'s balance and statements anytime.\n\nThanks!`;
+  let url = `mailto:${player.parentEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  if (player.parentEmail2) url += `&cc=${encodeURIComponent(player.parentEmail2)}`;
+  return url;
+}
+
 async function commitInChunks(snapshot) {
   const docs = snapshot.docs;
   for (let i = 0; i < docs.length; i += 400) {
@@ -623,7 +633,13 @@ function RosterTab({ teamName, players, ledger, addPlayer, addPlayersBulk, updat
                 </td>
                 <td className="px-4 py-3"><div className="flex items-center gap-1.5"><code className="px-2 py-1 rounded-md text-xs font-bold tracking-wide" style={{ background: C.pitchTint, color: C.pitchDark }}>{p.accessCode}</code>
                   <button onClick={() => copyCode(p)} title="Copy code" className="text-xs" style={{ color: C.inkSoft }}>{copiedId === p.id ? "✓" : "⧉"}</button>
-                  <button onClick={() => updatePlayer(p.id, { accessCode: genCode() })} title="Regenerate code" style={{ color: C.inkSoft }}>↻</button></div></td>
+                  <button onClick={() => updatePlayer(p.id, { accessCode: genCode() })} title="Regenerate code" style={{ color: C.inkSoft }}>↻</button>
+                  {p.parentEmail ? (
+                    <a href={buildAccessCodeMailto(teamName, p)} title={`Email code to ${p.parentEmail}`} style={{ color: C.inkSoft, textDecoration: "none" }}>✉</a>
+                  ) : (
+                    <span title="No parent email on file — add one to enable this" style={{ color: C.line, cursor: "default" }}>✉</span>
+                  )}
+                </div></td>
                 <td className="px-4 py-3 text-right"><MoneyText value={ledger.currentBalance(p.id)} /></td>
                 <td className="px-4 py-3"><div className="flex items-center justify-end gap-3">
                   <button onClick={() => startEdit(p)} className="text-xs font-semibold" style={{ color: C.pitchDark }}>Edit</button>
