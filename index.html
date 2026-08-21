@@ -389,6 +389,18 @@ async function exportPlayerStatementPDF(teamName, player, month, stats) {
    Statement detail (shared by admin drill-down + parent view)
 ---------------------------------------------------------------- */
 function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, onBack, allowEmail }) {
+  const [emailHint, setEmailHint] = useState(false);
+  const [emailBusy, setEmailBusy] = useState(false);
+  const emailWithPdf = async () => {
+    setEmailBusy(true);
+    try {
+      await exportPlayerStatementPDF(teamName, player, month, stats);
+      window.location.href = buildStatementMailto(teamName, player, month, stats);
+      setEmailHint(true);
+      setTimeout(() => setEmailHint(false), 8000);
+    } catch (e) { alert("Couldn't generate the PDF — check your connection and try again."); }
+    setEmailBusy(false);
+  };
   return (
     <div>
       <div className="flex items-center justify-between mb-4 print:hidden flex-wrap gap-2">
@@ -398,12 +410,17 @@ function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, o
           <ExportButton onExport={() => exportPlayerStatementPDF(teamName, player, month, stats)} />
           <Button variant="ghost" onClick={() => window.print()}>🖨 Print</Button>
           {allowEmail && (player.parentEmail ? (
-            <Button variant="ghost" onClick={() => { window.location.href = buildStatementMailto(teamName, player, month, stats); }}>✉ Email to parent</Button>
+            <Button variant="ghost" disabled={emailBusy} onClick={emailWithPdf}>{emailBusy ? <Spinner size={14} /> : "✉"} Email to parent</Button>
           ) : (
             <span className="text-xs font-semibold px-3 py-2" style={{ color: C.inkSoft }} title="Add a parent email on the Roster tab to enable this">✉ No parent email on file</span>
           ))}
         </div>
       </div>
+      {emailHint && (
+        <div className="rounded-xl p-3 mb-4 print:hidden text-sm font-semibold" style={{ background: C.pitchTint, color: C.pitchDark }}>
+          📎 The PDF just downloaded — attach it to the email that opened before you hit send.
+        </div>
+      )}
       <div className="rounded-2xl p-6" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <div className="flex items-start justify-between flex-wrap gap-3 border-b pb-4 mb-4" style={{ borderColor: C.lineSoft }}>
           <div className="flex items-center gap-3">
