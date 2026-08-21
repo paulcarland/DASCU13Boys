@@ -227,6 +227,18 @@ function buildAccessCodeMailto(teamName, player) {
   return url;
 }
 
+function buildStatementMailto(teamName, player, month, stats) {
+  const greetingName = player.parentName ? player.parentName.split(" ")[0] : "there";
+  const lines = stats.rows.length
+    ? stats.rows.map((t) => `  ${t.date} — ${t.category}${t.description ? " (" + t.description + ")" : ""}: ${t.direction === "debit" ? "+" : "-"}${fmtMoney(t.amount)}`).join("\n")
+    : "  No activity this month.";
+  const subject = `${teamName} — ${player.name}'s Statement — ${monthLabel(month)}`;
+  const body = `Hi ${greetingName},\n\nHere is ${player.name}'s account statement for ${monthLabel(month)} from ${teamName}.\n\nBeginning balance: ${fmtMoney(stats.beginning)}\nDebits (charges): ${fmtMoney(stats.debits)}\nCredits (paid): ${fmtMoney(stats.credits)}\nEnding balance: ${fmtMoney(Math.abs(stats.ending))}${stats.ending > 0.004 ? " CR" : ""}\n\nTransactions this month:\n${lines}\n\nIf you have any questions, please don't hesitate to reach out.\n\nThanks,\n${teamName}`;
+  let url = `mailto:${player.parentEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  if (player.parentEmail2) url += `&cc=${encodeURIComponent(player.parentEmail2)}`;
+  return url;
+}
+
 async function commitInChunks(snapshot) {
   const docs = snapshot.docs;
   for (let i = 0; i < docs.length; i += 400) {
@@ -376,15 +388,20 @@ async function exportPlayerStatementPDF(teamName, player, month, stats) {
 /* ---------------------------------------------------------------
    Statement detail (shared by admin drill-down + parent view)
 ---------------------------------------------------------------- */
-function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, onBack }) {
+function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, onBack, allowEmail }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4 print:hidden flex-wrap gap-2">
         {onBack ? <button onClick={onBack} className="text-sm font-semibold" style={{ color: C.pitchDark }}>← Back to summary</button> : <div />}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={inputStyle} className={`${inputClass} w-auto`} />
           <ExportButton onExport={() => exportPlayerStatementPDF(teamName, player, month, stats)} />
           <Button variant="ghost" onClick={() => window.print()}>🖨 Print</Button>
+          {allowEmail && (player.parentEmail ? (
+            <Button variant="ghost" onClick={() => { window.location.href = buildStatementMailto(teamName, player, month, stats); }}>✉ Email to parent</Button>
+          ) : (
+            <span className="text-xs font-semibold px-3 py-2" style={{ color: C.inkSoft }} title="Add a parent email on the Roster tab to enable this">✉ No parent email on file</span>
+          ))}
         </div>
       </div>
       <div className="rounded-2xl p-6" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
@@ -840,7 +857,7 @@ function StatementsTab({ teamName, players, ledger, initialPlayerId, onConsumedI
     const p = players.find((pl) => pl.id === openPlayerId);
     const idx = players.findIndex((pl) => pl.id === openPlayerId);
     if (!p) { setOpenPlayerId(null); return null; }
-    return <StatementDetail teamName={teamName} player={p} jerseyNo={idx + 1} month={month} setMonth={setMonth} stats={ledger.monthStats(p.id, month)} onBack={() => setOpenPlayerId(null)} />;
+    return <StatementDetail teamName={teamName} player={p} jerseyNo={idx + 1} month={month} setMonth={setMonth} stats={ledger.monthStats(p.id, month)} onBack={() => setOpenPlayerId(null)} allowEmail />;
   }
   return (
     <div>
