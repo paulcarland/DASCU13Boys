@@ -71,6 +71,8 @@
   @keyframes tt-spin{to{transform:rotate(360deg)}}
   .table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
   .table-scroll > table{min-width:640px}
+  .scroll-hint{display:flex}
+  @media (min-width:640px){ .scroll-hint{display:none} }
   .tab-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
   .tab-scroll::-webkit-scrollbar{display:none}
   .tab-scroll > button{flex-shrink:0}
@@ -435,6 +437,8 @@ function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, o
           <div className="rounded-xl p-3" style={{ background: C.creditTint }}><p className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.credit }}>Credits (paid)</p><span className="text-base font-bold" style={{ color: C.credit }}>{fmtMoney(stats.credits)}</span></div>
         </div>
         {stats.rows.length === 0 ? <p className="text-sm text-center py-6" style={{ color: C.inkSoft }}>No activity this month.</p> : (
+          <div>
+          <p className="scroll-hint items-center gap-1.5 text-xs font-semibold mb-2" style={{ color: C.inkSoft }}>↔ Swipe to see all columns</p>
           <div className="table-scroll">
           <table className="w-full text-sm">
             <thead><tr className="text-left" style={{ color: C.inkSoft }}><th className="font-semibold pb-2">Date</th><th className="font-semibold pb-2">Category</th><th className="font-semibold pb-2">Description</th><th className="font-semibold pb-2 text-right">Debit</th><th className="font-semibold pb-2 text-right">Credit</th><th className="font-semibold pb-2 text-right">Balance</th></tr></thead>
@@ -447,6 +451,7 @@ function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, o
               </tr>
             ))}</tbody>
           </table>
+          </div>
           </div>
         )}
       </div>
