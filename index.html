@@ -390,7 +390,7 @@ async function exportPlayerStatementPDF(teamName, player, month, stats) {
 /* ---------------------------------------------------------------
    Statement detail (shared by admin drill-down + parent view)
 ---------------------------------------------------------------- */
-function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, onBack, allowEmail }) {
+function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, onBack, allowEmail, monthHint }) {
   const [emailHint, setEmailHint] = useState(false);
   const [emailBusy, setEmailBusy] = useState(false);
   const emailWithPdf = async () => {
@@ -405,7 +405,7 @@ function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, o
   };
   return (
     <div>
-      <div className="flex items-center justify-between mb-4 print:hidden flex-wrap gap-2">
+      <div className="flex items-center justify-between mb-3 print:hidden flex-wrap gap-2">
         {onBack ? <button onClick={onBack} className="text-sm font-semibold" style={{ color: C.pitchDark }}>← Back to summary</button> : <div />}
         <div className="flex items-center gap-2 flex-wrap">
           <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={inputStyle} className={`${inputClass} w-auto`} />
@@ -418,6 +418,9 @@ function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, o
           ))}
         </div>
       </div>
+      {monthHint && (
+        <p className="text-xs mb-3 print:hidden" style={{ color: C.inkSoft }}>📅 Pick a different month above to see past statements.</p>
+      )}
       {emailHint && (
         <div className="rounded-xl p-3 mb-4 print:hidden text-sm font-semibold" style={{ background: C.pitchTint, color: C.pitchDark }}>
           📎 The PDF just downloaded — attach it to the email that opened before you hit send.
@@ -1018,7 +1021,7 @@ function SeasonsPanel({ teamName, players, transactions, onArchiveSeason }) {
 /* ---------------------------------------------------------------
    Admin: Settings tab
 ---------------------------------------------------------------- */
-function SettingsTab({ teamName, setTeamName, parentMessage, setParentMessage, venmoUsername, setVenmoUsername, venmoQrDataUri, setVenmoQrDataUri, players, transactions, onChangePin, onResetAll, onRestoreBackup, onArchiveSeason }) {
+function SettingsTab({ teamName, setTeamName, parentMessage, setParentMessage, venmoUsername, setVenmoUsername, treasurerEmail, setTreasurerEmail, players, transactions, onChangePin, onResetAll, onRestoreBackup, onArchiveSeason }) {
   const [name, setName] = useState(teamName);
   useEffect(() => setName(teamName), [teamName]);
 
@@ -1039,18 +1042,14 @@ function SettingsTab({ teamName, setTeamName, parentMessage, setParentMessage, v
     setVenmoSaved(true);
     setTimeout(() => setVenmoSaved(false), 1500);
   };
-  const [qrBusy, setQrBusy] = useState(false);
-  const onQrFileChosen = (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    setQrBusy(true);
-    const reader = new FileReader();
-    reader.onload = async () => {
-      await setVenmoQrDataUri(String(reader.result || ""));
-      setQrBusy(false);
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
+
+  const [emailDraft, setEmailDraft] = useState(treasurerEmail);
+  useEffect(() => setEmailDraft(treasurerEmail), [treasurerEmail]);
+  const [emailSaved, setEmailSaved] = useState(false);
+  const saveEmail = async () => {
+    await setTreasurerEmail(emailDraft.trim());
+    setEmailSaved(true);
+    setTimeout(() => setEmailSaved(false), 1500);
   };
 
   const [restorePreview, setRestorePreview] = useState(null);
@@ -1106,22 +1105,20 @@ function SettingsTab({ teamName, setTeamName, parentMessage, setParentMessage, v
         <Field label="Venmo username" hint="Just the username, no @ or full link needed">
           <TextInput value={venmoDraft} onChange={(e) => setVenmoDraft(e.target.value)} placeholder="e.g. Jane-Smith" />
         </Field>
-        <div className="flex items-center gap-3 mt-3 mb-4">
+        <div className="flex items-center gap-3 mt-3">
           <Button onClick={saveVenmo}>Save username</Button>
           {venmoSaved && <p className="text-sm font-semibold" style={{ color: C.pitchDark }}>✓ Saved</p>}
         </div>
-        <div className="pt-4" style={{ borderTop: `1px solid ${C.lineSoft}` }}>
-          <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: C.inkSoft }}>QR code (optional backup)</p>
-          <div className="flex items-center gap-4 flex-wrap">
-            {venmoQrDataUri && <img src={venmoQrDataUri} alt="Venmo QR code" style={{ width: 90, height: 90, objectFit: "contain", borderRadius: 12, border: `1px solid ${C.line}` }} />}
-            <div className="flex items-center gap-3 flex-wrap">
-              <label className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold cursor-pointer" style={{ border: `1px solid ${C.line}`, color: C.ink }}>
-                {qrBusy ? <Spinner size={14} /> : "📷"} {venmoQrDataUri ? "Replace image" : "Upload image"}
-                <input type="file" accept="image/*" className="hidden" onChange={onQrFileChosen} />
-              </label>
-              {venmoQrDataUri && <button onClick={() => setVenmoQrDataUri("")} className="text-xs font-semibold" style={{ color: C.debit }}>Remove</button>}
-            </div>
-          </div>
+      </div>
+      <div className="rounded-2xl p-5" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <p className="font-black mb-2" style={{ color: C.ink }}>Contact info</p>
+        <p className="text-sm mb-3" style={{ color: C.inkSoft }}>Adds a "Message the Treasurer" button to every parent's account page, pre-addressed to this email. Leave blank to hide it.</p>
+        <Field label="Treasurer email">
+          <TextInput type="email" value={emailDraft} onChange={(e) => setEmailDraft(e.target.value)} placeholder="you@example.com" />
+        </Field>
+        <div className="flex items-center gap-3 mt-3">
+          <Button onClick={saveEmail}>Save email</Button>
+          {emailSaved && <p className="text-sm font-semibold" style={{ color: C.pitchDark }}>✓ Saved</p>}
         </div>
       </div>
       <div className="rounded-2xl p-5" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
@@ -1245,7 +1242,7 @@ function DashboardTab({ players, transactions, ledger, onOpenStatement }) {
 /* ---------------------------------------------------------------
    Admin shell
 ---------------------------------------------------------------- */
-function AdminShell({ teamName, setTeamName, parentMessage, setParentMessage, venmoUsername, setVenmoUsername, venmoQrDataUri, setVenmoQrDataUri, players, transactions, addPlayer, addPlayersBulk, updatePlayer, deletePlayer, addTxn, addBulkTxn, deleteTxn, updateTxn, onLock, onResetAll, onRestoreBackup, onArchiveSeason }) {
+function AdminShell({ teamName, setTeamName, parentMessage, setParentMessage, venmoUsername, setVenmoUsername, treasurerEmail, setTreasurerEmail, players, transactions, addPlayer, addPlayersBulk, updatePlayer, deletePlayer, addTxn, addBulkTxn, deleteTxn, updateTxn, onLock, onResetAll, onRestoreBackup, onArchiveSeason }) {
   const [tab, setTab] = useState("dashboard");
   const [statementPlayerId, setStatementPlayerId] = useState(null);
   const [txnPresetPlayer] = useState(null);
@@ -1267,7 +1264,7 @@ function AdminShell({ teamName, setTeamName, parentMessage, setParentMessage, ve
         {tab === "roster" && <RosterTab teamName={teamName} players={players} ledger={ledger} addPlayer={addPlayer} addPlayersBulk={addPlayersBulk} updatePlayer={updatePlayer} deletePlayer={deletePlayer} onOpenStatement={(id) => { setStatementPlayerId(id); setTab("statements"); }} />}
         {tab === "transactions" && <TransactionsTab teamName={teamName} players={players} transactions={transactions} addTxn={addTxn} addBulkTxn={addBulkTxn} deleteTxn={deleteTxn} updateTxn={updateTxn} presetPlayerId={txnPresetPlayer} />}
         {tab === "statements" && <StatementsTab teamName={teamName} players={players} ledger={ledger} initialPlayerId={statementPlayerId} onConsumedInitial={() => setStatementPlayerId(null)} />}
-        {tab === "settings" && <SettingsTab teamName={teamName} setTeamName={setTeamName} parentMessage={parentMessage} setParentMessage={setParentMessage} venmoUsername={venmoUsername} setVenmoUsername={setVenmoUsername} venmoQrDataUri={venmoQrDataUri} setVenmoQrDataUri={setVenmoQrDataUri} players={players} transactions={transactions} onChangePin={() => onLock(true)} onResetAll={onResetAll} onRestoreBackup={onRestoreBackup} onArchiveSeason={onArchiveSeason} />}
+        {tab === "settings" && <SettingsTab teamName={teamName} setTeamName={setTeamName} parentMessage={parentMessage} setParentMessage={setParentMessage} venmoUsername={venmoUsername} setVenmoUsername={setVenmoUsername} treasurerEmail={treasurerEmail} setTreasurerEmail={setTreasurerEmail} players={players} transactions={transactions} onChangePin={() => onLock(true)} onResetAll={onResetAll} onRestoreBackup={onRestoreBackup} onArchiveSeason={onArchiveSeason} />}
       </main>
     </div>
   );
@@ -1301,7 +1298,7 @@ function ParentGate({ players, onVerified, onBack }) {
     </div>
   );
 }
-function ParentView({ teamName, parentMessage, venmoUsername, venmoQrDataUri, players, transactions, playerId, onLogout }) {
+function ParentView({ teamName, parentMessage, venmoUsername, treasurerEmail, players, transactions, playerId, onLogout }) {
   const ledger = useLedger(players, transactions);
   const [month, setMonth] = useState(thisMonthStr());
   const [showPay, setShowPay] = useState(false);
@@ -1312,6 +1309,9 @@ function ParentView({ teamName, parentMessage, venmoUsername, venmoQrDataUri, pl
   const balance = ledger.currentBalance(playerId);
   const label = balance < -0.004 ? "Amount due" : balance > 0.004 ? "Credit balance" : "Paid in full";
   const venmoLink = venmoUsername ? `https://venmo.com/${venmoUsername}?txn=pay&note=${encodeURIComponent(`${player.name} (${teamName})`)}` : null;
+  const treasurerMailto = treasurerEmail
+    ? `mailto:${treasurerEmail}?subject=${encodeURIComponent(`${teamName} — Question about ${player.name}'s account`)}`
+    : null;
   return (
     <div style={{ background: C.bg, minHeight: "100vh" }}>
       <header className="flex items-center justify-between px-5 py-4 print:hidden" style={{ borderBottom: `1px solid ${C.line}` }}>
@@ -1328,26 +1328,23 @@ function ParentView({ teamName, parentMessage, venmoUsername, venmoQrDataUri, pl
           <div><p className="font-black text-lg">{player.name}</p><p className="text-xs opacity-80">{label}</p></div>
           <span className="text-2xl font-black" style={{ fontVariantNumeric: "tabular-nums" }}>{fmtMoney(Math.abs(balance))}</span>
         </div>
-        {venmoLink && (
+        {(venmoLink || treasurerMailto) && (
           <div className="mb-5 print:hidden">
-            <Button variant="dark" onClick={() => setShowPay((s) => !s)}>💳 Make a Payment</Button>
-            {showPay && (
+            <div className="flex items-center gap-2 flex-wrap">
+              {venmoLink && <Button variant="dark" onClick={() => setShowPay((s) => !s)}>💳 Make a Payment</Button>}
+              {treasurerMailto && <Button variant="ghost" onClick={() => { window.location.href = treasurerMailto; }}>✉ Message the Treasurer</Button>}
+            </div>
+            {showPay && venmoLink && (
               <div className="rounded-2xl p-5 mt-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
                 <a href={venmoLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold" style={{ background: "#3D95CE", color: "#fff", textDecoration: "none" }}>
                   Pay via Venmo ↗
                 </a>
                 <p className="text-xs mt-2" style={{ color: C.inkSoft }}>Opens Venmo with the payment note pre-filled — you'll enter the amount yourself.</p>
-                {venmoQrDataUri && (
-                  <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${C.lineSoft}` }}>
-                    <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: C.inkSoft }}>Or scan to pay</p>
-                    <img src={venmoQrDataUri} alt="Venmo QR code" style={{ width: 160, height: 160, objectFit: "contain", borderRadius: 12, border: `1px solid ${C.line}` }} />
-                  </div>
-                )}
               </div>
             )}
           </div>
         )}
-        <StatementDetail teamName={teamName} player={player} month={month} setMonth={setMonth} stats={stats} />
+        <StatementDetail teamName={teamName} player={player} month={month} setMonth={setMonth} stats={stats} monthHint />
       </main>
     </div>
   );
@@ -1363,7 +1360,7 @@ function App() {
   const [teamName, setTeamNameState] = useState("U13 Boys Team Treasury");
   const [parentMessage, setParentMessageState] = useState("");
   const [venmoUsername, setVenmoUsernameState] = useState("");
-  const [venmoQrDataUri, setVenmoQrDataUriState] = useState("");
+  const [treasurerEmail, setTreasurerEmailState] = useState("");
   const [pin, setPinState] = useState(null);
   const [screen, setScreen] = useState("landing");
   const [forceChangePin, setForceChangePin] = useState(false);
@@ -1376,7 +1373,7 @@ function App() {
       if (!user) { auth.signInAnonymously().catch((e) => console.error("Auth error:", e)); return; }
       unsubPlayers = db.collection("players").onSnapshot((snap) => setPlayers(snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name))), (e) => console.error(e));
       unsubTxns = db.collection("transactions").onSnapshot((snap) => setTransactions(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => console.error(e));
-      unsubTeam = db.collection("meta").doc("team").onSnapshot((doc) => { if (doc.exists) { const d = doc.data(); setTeamNameState(d.teamName || "U13 Boys Team Treasury"); setParentMessageState(d.parentMessage || ""); setVenmoUsernameState(d.venmoUsername || ""); setVenmoQrDataUriState(d.venmoQrDataUri || ""); } });
+      unsubTeam = db.collection("meta").doc("team").onSnapshot((doc) => { if (doc.exists) { const d = doc.data(); setTeamNameState(d.teamName || "U13 Boys Team Treasury"); setParentMessageState(d.parentMessage || ""); setVenmoUsernameState(d.venmoUsername || ""); setTreasurerEmailState(d.treasurerEmail || ""); } });
       db.collection("meta").doc("admin").get().then((doc) => setPinState(doc.exists ? doc.data().pin : null));
       setReady(true);
     });
@@ -1412,7 +1409,7 @@ function App() {
   const setTeamName = useCallback(async (name) => { await window.db.collection("meta").doc("team").set({ teamName: name }, { merge: true }); }, []);
   const setParentMessage = useCallback(async (msg) => { await window.db.collection("meta").doc("team").set({ parentMessage: msg }, { merge: true }); }, []);
   const setVenmoUsername = useCallback(async (u) => { await window.db.collection("meta").doc("team").set({ venmoUsername: u }, { merge: true }); }, []);
-  const setVenmoQrDataUri = useCallback(async (uri) => { await window.db.collection("meta").doc("team").set({ venmoQrDataUri: uri }, { merge: true }); }, []);
+  const setTreasurerEmail = useCallback(async (email) => { await window.db.collection("meta").doc("team").set({ treasurerEmail: email }, { merge: true }); }, []);
   const setPin = useCallback(async (p) => { await window.db.collection("meta").doc("admin").set({ pin: p }, { merge: true }); setPinState(p); }, []);
   const resetAll = useCallback(async () => {
     const ps = await window.db.collection("players").get(); await commitInChunks(ps);
@@ -1470,9 +1467,9 @@ function App() {
   let body;
   if (screen === "landing") body = <Landing teamName={teamName} onPickAdmin={() => setScreen("adminGate")} onPickParent={() => setScreen("parentGate")} />;
   else if (screen === "adminGate") body = <AdminGate pin={forceChangePin ? null : pin} onSetPin={async (p) => { await setPin(p); setForceChangePin(false); setScreen("admin"); }} onUnlock={() => setScreen("admin")} onBack={() => { setScreen("landing"); setForceChangePin(false); }} />;
-  else if (screen === "admin") body = <AdminShell teamName={teamName} setTeamName={setTeamName} parentMessage={parentMessage} setParentMessage={setParentMessage} venmoUsername={venmoUsername} setVenmoUsername={setVenmoUsername} venmoQrDataUri={venmoQrDataUri} setVenmoQrDataUri={setVenmoQrDataUri} players={players} transactions={transactions} addPlayer={addPlayer} addPlayersBulk={addPlayersBulk} updatePlayer={updatePlayer} deletePlayer={deletePlayer} addTxn={addTxn} addBulkTxn={addBulkTxn} deleteTxn={deleteTxn} updateTxn={updateTxn} onLock={(changePin) => { setScreen("adminGate"); setForceChangePin(!!changePin); }} onResetAll={resetAll} onRestoreBackup={restoreFromBackup} onArchiveSeason={archiveSeason} />;
+  else if (screen === "admin") body = <AdminShell teamName={teamName} setTeamName={setTeamName} parentMessage={parentMessage} setParentMessage={setParentMessage} venmoUsername={venmoUsername} setVenmoUsername={setVenmoUsername} treasurerEmail={treasurerEmail} setTreasurerEmail={setTreasurerEmail} players={players} transactions={transactions} addPlayer={addPlayer} addPlayersBulk={addPlayersBulk} updatePlayer={updatePlayer} deletePlayer={deletePlayer} addTxn={addTxn} addBulkTxn={addBulkTxn} deleteTxn={deleteTxn} updateTxn={updateTxn} onLock={(changePin) => { setScreen("adminGate"); setForceChangePin(!!changePin); }} onResetAll={resetAll} onRestoreBackup={restoreFromBackup} onArchiveSeason={archiveSeason} />;
   else if (screen === "parentGate") body = <ParentGate players={players} onVerified={(id) => { setParentPlayerId(id); setScreen("parent"); }} onBack={() => setScreen("landing")} />;
-  else if (screen === "parent") body = <ParentView teamName={teamName} parentMessage={parentMessage} venmoUsername={venmoUsername} venmoQrDataUri={venmoQrDataUri} players={players} transactions={transactions} playerId={parentPlayerId} onLogout={() => { setParentPlayerId(null); setScreen("landing"); }} />;
+  else if (screen === "parent") body = <ParentView teamName={teamName} parentMessage={parentMessage} venmoUsername={venmoUsername} treasurerEmail={treasurerEmail} players={players} transactions={transactions} playerId={parentPlayerId} onLogout={() => { setParentPlayerId(null); setScreen("landing"); }} />;
 
   return <div style={{ fontFamily: "ui-sans-serif, system-ui, -apple-system, sans-serif" }}>{body}</div>;
 }
