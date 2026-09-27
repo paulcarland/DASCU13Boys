@@ -1275,7 +1275,9 @@ function AdminShell({ teamName, setTeamName, parentMessage, setParentMessage, ve
 ---------------------------------------------------------------- */
 function ParentGate({ players, onVerified, onBack }) {
   const [name, setName] = useState(""); const [code, setCode] = useState(""); const [err, setErr] = useState("");
-  const submit = () => {
+  const [showCode, setShowCode] = useState(false);
+  const submit = (e) => {
+    if (e) e.preventDefault();
     if (!name.trim() || !code.trim()) { setErr("Enter your player's name and access code."); return; }
     const match = players.find((p) => p.name.trim().toLowerCase() === name.trim().toLowerCase() && p.accessCode === code.trim().toUpperCase());
     if (match) onVerified(match.id); else setErr("We couldn't find that player and code combination. Check with your team treasurer.");
@@ -1287,12 +1289,33 @@ function ParentGate({ players, onVerified, onBack }) {
         <div className="rounded-2xl p-6" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
           <h2 className="font-black text-lg" style={{ color: C.ink }}>👥 Parent portal</h2>
           <p className="text-sm mt-1 mb-4" style={{ color: C.inkSoft }}>Enter your player's name exactly as registered, plus the access code from your treasurer.</p>
-          <div className="grid gap-3">
-            <Field label="Player name"><TextInput value={name} onChange={(e) => { setName(e.target.value); setErr(""); }} placeholder="Full name" style={err ? { borderColor: C.debit } : undefined} /></Field>
-            <Field label="Access code"><TextInput value={code} onChange={(e) => { setCode(e.target.value); setErr(""); }} placeholder="6-character code" onKeyDown={(e) => e.key === "Enter" && submit()} style={err ? { borderColor: C.debit } : undefined} /></Field>
+          <form className="grid gap-3" onSubmit={submit}>
+            <Field label="Player name">
+              <TextInput
+                value={name} onChange={(e) => { setName(e.target.value); setErr(""); }}
+                placeholder="Full name" name="username" autoComplete="username"
+                style={err ? { borderColor: C.debit } : undefined}
+              />
+            </Field>
+            <Field label="Access code">
+              <div style={{ position: "relative" }}>
+                <TextInput
+                  type={showCode ? "text" : "password"}
+                  value={code} onChange={(e) => { setCode(e.target.value); setErr(""); }}
+                  placeholder="6-character code" name="password" autoComplete="current-password"
+                  style={{ paddingRight: 40, ...(err ? { borderColor: C.debit } : {}) }}
+                />
+                <button
+                  type="button" onClick={() => setShowCode((s) => !s)} title={showCode ? "Hide code" : "Show code"}
+                  style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: C.inkSoft, background: "none" }}
+                >
+                  {showCode ? "🙈" : "👁"}
+                </button>
+              </div>
+            </Field>
             {err && <p className="text-xs font-semibold" style={{ color: C.debit }}>⚠ {err}</p>}
-            <Button variant="dark" onClick={submit}>View account</Button>
-          </div>
+            <Button type="submit" variant="dark">View account</Button>
+          </form>
         </div>
       </div>
     </div>
