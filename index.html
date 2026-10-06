@@ -465,7 +465,7 @@ function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, o
 /* ---------------------------------------------------------------
    Landing
 ---------------------------------------------------------------- */
-function Landing({ teamName, logo, onPickAdmin, onPickParent }) {
+function Landing({ teamName, logo, showCoach, onPickAdmin, onPickParent, onPickCoach }) {
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-16" style={{ background: C.bg }}>
       <div className="w-full max-w-md text-center">
@@ -479,6 +479,11 @@ function Landing({ teamName, logo, onPickAdmin, onPickParent }) {
           <button onClick={onPickParent} className="flex items-center justify-between rounded-2xl p-4 text-left transition-transform hover:scale-[1.01]" style={{ background: C.surface, color: C.ink, border: `1px solid ${C.line}` }}>
             <span className="font-bold">👥 Parent portal</span><span>›</span>
           </button>
+          {showCoach && (
+            <button onClick={onPickCoach} className="flex items-center justify-between rounded-2xl p-4 text-left transition-transform hover:scale-[1.01]" style={{ background: C.surface, color: C.ink, border: `1px solid ${C.line}` }}>
+              <span className="font-bold">📋 Coach view</span><span>›</span>
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -1021,7 +1026,7 @@ function SeasonsPanel({ teamName, players, transactions, onArchiveSeason }) {
 /* ---------------------------------------------------------------
    Admin: Settings tab
 ---------------------------------------------------------------- */
-function SettingsTab({ teamName, setTeamName, parentMessage, setParentMessage, venmoUsername, setVenmoUsername, treasurerEmail, setTreasurerEmail, teamLogo, setTeamLogo, players, transactions, onChangePin, onResetAll, onRestoreBackup, onArchiveSeason }) {
+function SettingsTab({ teamName, setTeamName, parentMessage, setParentMessage, venmoUsername, setVenmoUsername, treasurerEmail, setTreasurerEmail, teamLogo, setTeamLogo, coachPin, setCoachPin, treasurerPin, players, transactions, onChangePin, onResetAll, onRestoreBackup, onArchiveSeason }) {
   const [name, setName] = useState(teamName);
   useEffect(() => setName(teamName), [teamName]);
 
@@ -1055,6 +1060,26 @@ function SettingsTab({ teamName, setTeamName, parentMessage, setParentMessage, v
     await setVenmoUsername(venmoDraft.trim().replace(/^@/, ""));
     setVenmoSaved(true);
     setTimeout(() => setVenmoSaved(false), 1500);
+  };
+
+  const [coachDraft, setCoachDraft] = useState(coachPin);
+  useEffect(() => setCoachDraft(coachPin), [coachPin]);
+  const [coachErr, setCoachErr] = useState("");
+  const [coachSaved, setCoachSaved] = useState(false);
+  const saveCoach = async () => {
+    const v = coachDraft.trim();
+    if (v.length < 4) { setCoachErr("Coach PIN must be at least 4 digits."); return; }
+    if (v === treasurerPin) { setCoachErr("Coach PIN must be different from your treasurer PIN."); return; }
+    setCoachErr("");
+    await setCoachPin(v);
+    setCoachSaved(true);
+    setTimeout(() => setCoachSaved(false), 1500);
+  };
+  const turnOffCoach = async () => {
+    if (!confirm("Turn off coach access? Coaches won't be able to sign in until you set a new PIN.")) return;
+    setCoachErr("");
+    await setCoachPin("");
+    setCoachDraft("");
   };
 
   const [emailDraft, setEmailDraft] = useState(treasurerEmail);
@@ -1136,6 +1161,19 @@ function SettingsTab({ teamName, setTeamName, parentMessage, setParentMessage, v
         <div className="flex items-center gap-3 mt-3">
           <Button onClick={saveVenmo}>Save username</Button>
           {venmoSaved && <p className="text-sm font-semibold" style={{ color: C.pitchDark }}>✓ Saved</p>}
+        </div>
+      </div>
+      <div className="rounded-2xl p-5" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <p className="font-black mb-2" style={{ color: C.ink }}>Coach access</p>
+        <p className="text-sm mb-3" style={{ color: C.inkSoft }}>Adds a "Coach view" button to the sign-in screen. Coaches enter this PIN to see each active player's current balance — no transactions, fees, payments, or contact info. Leave it off to hide the button entirely.</p>
+        <Field label="Coach PIN" hint="4+ digits. Must be different from your treasurer PIN.">
+          <TextInput inputMode="numeric" value={coachDraft} onChange={(e) => { setCoachDraft(e.target.value.replace(/\D/g, "")); setCoachErr(""); }} placeholder="e.g. 4821" style={coachErr ? { borderColor: C.debit } : undefined} />
+        </Field>
+        {coachErr && <p className="text-xs font-semibold mt-2" style={{ color: C.debit }}>⚠ {coachErr}</p>}
+        <div className="flex items-center gap-3 mt-3 flex-wrap">
+          <Button onClick={saveCoach}>Save coach PIN</Button>
+          {coachPin && <button onClick={turnOffCoach} className="text-xs font-semibold" style={{ color: C.debit }}>Turn off coach access</button>}
+          {coachSaved && <p className="text-sm font-semibold" style={{ color: C.pitchDark }}>✓ Saved</p>}
         </div>
       </div>
       <div className="rounded-2xl p-5" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
@@ -1270,7 +1308,7 @@ function DashboardTab({ players, transactions, ledger, onOpenStatement }) {
 /* ---------------------------------------------------------------
    Admin shell
 ---------------------------------------------------------------- */
-function AdminShell({ teamName, setTeamName, parentMessage, setParentMessage, venmoUsername, setVenmoUsername, treasurerEmail, setTreasurerEmail, teamLogo, setTeamLogo, players, transactions, addPlayer, addPlayersBulk, updatePlayer, deletePlayer, addTxn, addBulkTxn, deleteTxn, updateTxn, onLock, onResetAll, onRestoreBackup, onArchiveSeason }) {
+function AdminShell({ teamName, setTeamName, parentMessage, setParentMessage, venmoUsername, setVenmoUsername, treasurerEmail, setTreasurerEmail, teamLogo, setTeamLogo, coachPin, setCoachPin, treasurerPin, players, transactions, addPlayer, addPlayersBulk, updatePlayer, deletePlayer, addTxn, addBulkTxn, deleteTxn, updateTxn, onLock, onResetAll, onRestoreBackup, onArchiveSeason }) {
   const [tab, setTab] = useState("dashboard");
   const [statementPlayerId, setStatementPlayerId] = useState(null);
   const [txnPresetPlayer] = useState(null);
@@ -1292,7 +1330,7 @@ function AdminShell({ teamName, setTeamName, parentMessage, setParentMessage, ve
         {tab === "roster" && <RosterTab teamName={teamName} players={players} ledger={ledger} addPlayer={addPlayer} addPlayersBulk={addPlayersBulk} updatePlayer={updatePlayer} deletePlayer={deletePlayer} onOpenStatement={(id) => { setStatementPlayerId(id); setTab("statements"); }} />}
         {tab === "transactions" && <TransactionsTab teamName={teamName} players={players} transactions={transactions} addTxn={addTxn} addBulkTxn={addBulkTxn} deleteTxn={deleteTxn} updateTxn={updateTxn} presetPlayerId={txnPresetPlayer} />}
         {tab === "statements" && <StatementsTab teamName={teamName} players={players} ledger={ledger} initialPlayerId={statementPlayerId} onConsumedInitial={() => setStatementPlayerId(null)} />}
-        {tab === "settings" && <SettingsTab teamName={teamName} setTeamName={setTeamName} parentMessage={parentMessage} setParentMessage={setParentMessage} venmoUsername={venmoUsername} setVenmoUsername={setVenmoUsername} treasurerEmail={treasurerEmail} setTreasurerEmail={setTreasurerEmail} teamLogo={teamLogo} setTeamLogo={setTeamLogo} players={players} transactions={transactions} onChangePin={() => onLock(true)} onResetAll={onResetAll} onRestoreBackup={onRestoreBackup} onArchiveSeason={onArchiveSeason} />}
+        {tab === "settings" && <SettingsTab teamName={teamName} setTeamName={setTeamName} parentMessage={parentMessage} setParentMessage={setParentMessage} venmoUsername={venmoUsername} setVenmoUsername={setVenmoUsername} treasurerEmail={treasurerEmail} setTreasurerEmail={setTreasurerEmail} teamLogo={teamLogo} setTeamLogo={setTeamLogo} coachPin={coachPin} setCoachPin={setCoachPin} treasurerPin={treasurerPin} players={players} transactions={transactions} onChangePin={() => onLock(true)} onResetAll={onResetAll} onRestoreBackup={onRestoreBackup} onArchiveSeason={onArchiveSeason} />}
       </main>
     </div>
   );
@@ -1301,6 +1339,75 @@ function AdminShell({ teamName, setTeamName, parentMessage, setParentMessage, ve
 /* ---------------------------------------------------------------
    Parent portal
 ---------------------------------------------------------------- */
+/* ---------------------------------------------------------------
+   Coach view (balances only)
+---------------------------------------------------------------- */
+function CoachGate({ coachPin, onUnlock, onBack }) {
+  const [val, setVal] = useState(""); const [err, setErr] = useState("");
+  const submit = (e) => {
+    if (e) e.preventDefault();
+    if (!val) { setErr("Enter the coach PIN."); return; }
+    if (val === coachPin) onUnlock(); else { setErr("Incorrect PIN."); setVal(""); }
+  };
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4 py-16" style={{ background: C.bg }}>
+      <div className="w-full max-w-sm">
+        <button onClick={onBack} className="text-sm font-semibold mb-6" style={{ color: C.inkSoft }}>← Back</button>
+        <div className="rounded-2xl p-6" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <h2 className="font-black text-lg" style={{ color: C.ink }}>📋 Coach view</h2>
+          <p className="text-sm mt-1 mb-4" style={{ color: C.inkSoft }}>Enter the coach PIN to see player balances.</p>
+          <form className="grid gap-3" onSubmit={submit}>
+            <input type="text" name="username" autoComplete="username" defaultValue="coach" readOnly tabIndex={-1} aria-hidden="true" style={{ position: "absolute", left: -9999, width: 1, height: 1, opacity: 0 }} />
+            <TextInput
+              type="password" inputMode="numeric" autoFocus name="password" autoComplete="current-password"
+              value={val} onChange={(e) => { setVal(e.target.value.replace(/\D/g, "")); setErr(""); }} placeholder="PIN"
+              style={err ? { borderColor: C.debit } : undefined}
+            />
+            {err && <p className="text-xs font-semibold" style={{ color: C.debit }}>⚠ {err}</p>}
+            <Button type="submit" variant="dark">View balances</Button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CoachView({ teamName, players, transactions, onLogout }) {
+  const ledger = useLedger(players, transactions);
+  const roster = players.filter((p) => p.active);
+  return (
+    <div style={{ background: C.bg, minHeight: "100vh" }}>
+      <header className="flex items-center justify-between px-5 py-4" style={{ borderBottom: `1px solid ${C.line}` }}>
+        <p className="font-black truncate" style={{ color: C.ink }}>{teamName}</p>
+        <button onClick={onLogout} className="text-sm font-semibold" style={{ color: C.inkSoft, flexShrink: 0 }}>Sign out</button>
+      </header>
+      <main className="p-5 max-w-2xl mx-auto">
+        <p className="font-black text-lg" style={{ color: C.ink }}>Player balances</p>
+        <p className="text-xs mb-4" style={{ color: C.inkSoft }}>Current balance for each active player.</p>
+        {roster.length === 0 ? (
+          <EmptyState title="No players yet" body="Active players will show up here once they're added to the roster." />
+        ) : (
+          <div className="rounded-2xl overflow-hidden" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+            {roster.map((p, i) => {
+              const bal = ledger.currentBalance(p.id);
+              const status = bal < -0.004 ? "Amount due" : bal > 0.004 ? "Credit balance" : "Paid in full";
+              return (
+                <div key={p.id} className="flex items-center justify-between gap-3 px-4 py-3" style={{ borderTop: i === 0 ? "none" : `1px solid ${C.lineSoft}` }}>
+                  <span className="font-semibold text-sm min-w-0" style={{ color: C.ink }}>{p.name}</span>
+                  <div className="text-right" style={{ flexShrink: 0 }}>
+                    <MoneyText value={bal} />
+                    <p className="text-xs" style={{ color: C.inkSoft }}>{status}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
 function ParentGate({ players, onVerified, onBack }) {
   const [name, setName] = useState(""); const [code, setCode] = useState(""); const [err, setErr] = useState("");
   const [showCode, setShowCode] = useState(false);
@@ -1413,6 +1520,7 @@ function App() {
   const [venmoUsername, setVenmoUsernameState] = useState("");
   const [teamLogo, setTeamLogoState] = useState("");
   const [treasurerEmail, setTreasurerEmailState] = useState("");
+  const [coachPin, setCoachPinState] = useState("");
   const [pin, setPinState] = useState(null);
   const [screen, setScreen] = useState("landing");
   const [forceChangePin, setForceChangePin] = useState(false);
@@ -1425,12 +1533,17 @@ function App() {
       if (!user) { auth.signInAnonymously().catch((e) => console.error("Auth error:", e)); return; }
       unsubPlayers = db.collection("players").onSnapshot((snap) => setPlayers(snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name))), (e) => console.error(e));
       unsubTxns = db.collection("transactions").onSnapshot((snap) => setTransactions(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), (e) => console.error(e));
-      unsubTeam = db.collection("meta").doc("team").onSnapshot((doc) => { if (doc.exists) { const d = doc.data(); setTeamNameState(d.teamName || "U13 Boys Team Treasury"); setParentMessageState(d.parentMessage || ""); setVenmoUsernameState(d.venmoUsername || ""); setTreasurerEmailState(d.treasurerEmail || ""); setTeamLogoState(d.teamLogo || ""); } });
+      unsubTeam = db.collection("meta").doc("team").onSnapshot((doc) => { if (doc.exists) { const d = doc.data(); setTeamNameState(d.teamName || "U13 Boys Team Treasury"); setParentMessageState(d.parentMessage || ""); setVenmoUsernameState(d.venmoUsername || ""); setTreasurerEmailState(d.treasurerEmail || ""); setTeamLogoState(d.teamLogo || ""); setCoachPinState(d.coachPin || ""); } });
       db.collection("meta").doc("admin").get().then((doc) => setPinState(doc.exists ? doc.data().pin : null));
       setReady(true);
     });
     return () => { unsubAuth && unsubAuth(); unsubPlayers && unsubPlayers(); unsubTxns && unsubTxns(); unsubTeam && unsubTeam(); };
   }, []);
+
+  // If coach access is switched off while someone is on a coach screen, send them back to the sign-in screen.
+  useEffect(() => {
+    if (!coachPin && (screen === "coach" || screen === "coachGate")) setScreen("landing");
+  }, [coachPin, screen]);
 
   const addPlayer = useCallback(async (p) => { await window.db.collection("players").add(p); }, []);
   const addPlayersBulk = useCallback(async (playerObjs) => {
@@ -1462,6 +1575,7 @@ function App() {
   const setParentMessage = useCallback(async (msg) => { await window.db.collection("meta").doc("team").set({ parentMessage: msg }, { merge: true }); }, []);
   const setVenmoUsername = useCallback(async (u) => { await window.db.collection("meta").doc("team").set({ venmoUsername: u }, { merge: true }); }, []);
   const setTeamLogo = useCallback(async (uri) => { await window.db.collection("meta").doc("team").set({ teamLogo: uri }, { merge: true }); }, []);
+  const setCoachPin = useCallback(async (v) => { await window.db.collection("meta").doc("team").set({ coachPin: v }, { merge: true }); }, []);
   const setTreasurerEmail = useCallback(async (email) => { await window.db.collection("meta").doc("team").set({ treasurerEmail: email }, { merge: true }); }, []);
   const setPin = useCallback(async (p) => { await window.db.collection("meta").doc("admin").set({ pin: p }, { merge: true }); setPinState(p); }, []);
   const resetAll = useCallback(async () => {
@@ -1518,9 +1632,11 @@ function App() {
   if (!ready) return <div className="min-h-screen flex items-center justify-center" style={{ background: C.bg }}><Spinner size={22} /></div>;
 
   let body;
-  if (screen === "landing") body = <Landing teamName={teamName} logo={teamLogo} onPickAdmin={() => setScreen("adminGate")} onPickParent={() => setScreen("parentGate")} />;
+  if (screen === "landing") body = <Landing teamName={teamName} logo={teamLogo} showCoach={!!coachPin} onPickAdmin={() => setScreen("adminGate")} onPickParent={() => setScreen("parentGate")} onPickCoach={() => setScreen("coachGate")} />;
   else if (screen === "adminGate") body = <AdminGate pin={forceChangePin ? null : pin} onSetPin={async (p) => { await setPin(p); setForceChangePin(false); setScreen("admin"); }} onUnlock={() => setScreen("admin")} onBack={() => { setScreen("landing"); setForceChangePin(false); }} />;
-  else if (screen === "admin") body = <AdminShell teamName={teamName} setTeamName={setTeamName} parentMessage={parentMessage} setParentMessage={setParentMessage} venmoUsername={venmoUsername} setVenmoUsername={setVenmoUsername} treasurerEmail={treasurerEmail} setTreasurerEmail={setTreasurerEmail} teamLogo={teamLogo} setTeamLogo={setTeamLogo} players={players} transactions={transactions} addPlayer={addPlayer} addPlayersBulk={addPlayersBulk} updatePlayer={updatePlayer} deletePlayer={deletePlayer} addTxn={addTxn} addBulkTxn={addBulkTxn} deleteTxn={deleteTxn} updateTxn={updateTxn} onLock={(changePin) => { setScreen("adminGate"); setForceChangePin(!!changePin); }} onResetAll={resetAll} onRestoreBackup={restoreFromBackup} onArchiveSeason={archiveSeason} />;
+  else if (screen === "admin") body = <AdminShell teamName={teamName} setTeamName={setTeamName} parentMessage={parentMessage} setParentMessage={setParentMessage} venmoUsername={venmoUsername} setVenmoUsername={setVenmoUsername} treasurerEmail={treasurerEmail} setTreasurerEmail={setTreasurerEmail} teamLogo={teamLogo} setTeamLogo={setTeamLogo} coachPin={coachPin} setCoachPin={setCoachPin} treasurerPin={pin} players={players} transactions={transactions} addPlayer={addPlayer} addPlayersBulk={addPlayersBulk} updatePlayer={updatePlayer} deletePlayer={deletePlayer} addTxn={addTxn} addBulkTxn={addBulkTxn} deleteTxn={deleteTxn} updateTxn={updateTxn} onLock={(changePin) => { setScreen("adminGate"); setForceChangePin(!!changePin); }} onResetAll={resetAll} onRestoreBackup={restoreFromBackup} onArchiveSeason={archiveSeason} />;
+  else if (screen === "coachGate") body = <CoachGate coachPin={coachPin} onUnlock={() => setScreen("coach")} onBack={() => setScreen("landing")} />;
+  else if (screen === "coach") body = <CoachView teamName={teamName} players={players} transactions={transactions} onLogout={() => setScreen("landing")} />;
   else if (screen === "parentGate") body = <ParentGate players={players} onVerified={(id) => { setParentPlayerId(id); setScreen("parent"); }} onBack={() => setScreen("landing")} />;
   else if (screen === "parent") body = <ParentView teamName={teamName} parentMessage={parentMessage} venmoUsername={venmoUsername} treasurerEmail={treasurerEmail} players={players} transactions={transactions} playerId={parentPlayerId} onLogout={() => { setParentPlayerId(null); setScreen("landing"); }} />;
 
