@@ -229,10 +229,38 @@ function buildAccessCodeMailto(teamName, player) {
   return url;
 }
 
+/* ---------------------------------------------------------------
+   Itemized charges: split a shared cost equally and explain the math
+---------------------------------------------------------------- */
+const defaultCoachLines = () => [{ label: "Hotel", amount: "", note: "" }, { label: "Mileage", amount: "", note: "" }, { label: "Food", amount: "", note: "" }];
+// lines: [{label, amount, note}] (amount may be a string from an input); playerCount: how many players share the total.
+// Works in whole cents so nothing drifts; each share is rounded to the nearest cent.
+function computeSplit(lines, playerCount) {
+  const clean = (lines || [])
+    .map((l) => ({ label: String(l.label || "").trim(), cents: Math.round((parseFloat(l.amount) || 0) * 100), note: String(l.note || "").trim() }))
+    .filter((l) => l.cents > 0);
+  const totalCents = clean.reduce((sum, l) => sum + l.cents, 0);
+  const n = Math.max(0, Math.floor(Number(playerCount) || 0));
+  const shareCents = n > 0 ? Math.round(totalCents / n) : 0;
+  return {
+    lines: clean.map((l) => ({ label: l.label || "Item", amount: l.cents / 100, note: l.note })),
+    total: totalCents / 100, players: n, share: shareCents / 100, exact: n > 0 && shareCents * n === totalCents,
+  };
+}
+function breakdownParts(b) {
+  const itemsText = b.lines.map((l) => `${l.label} ${fmtMoney(l.amount)}${l.note ? " (" + l.note + ")" : ""}`).join(" + ");
+  const summaryText = `${fmtMoney(b.total)} total ÷ ${b.players} ${b.players === 1 ? "player" : "players"} = ${fmtMoney(b.share)} each${b.exact ? "" : " (rounded to the nearest cent)"}`;
+  return { itemsText, summaryText };
+}
+const hasBreakdown = (t) => !!(t && t.breakdown && t.breakdown.lines && t.breakdown.lines.length);
+const breakdownText = (b) => { const p = breakdownParts(b); return `${p.itemsText} = ${p.summaryText}`; };
+// Description text for PDFs: the note you typed, plus the calculation underneath when the charge is itemized.
+const pdfDescription = (t) => { const d = t.description || ""; const b = hasBreakdown(t) ? breakdownText(t.breakdown) : ""; return d && b ? d + "\n" + b : (d || b || "—"); };
+
 function buildStatementMailto(teamName, player, month, stats) {
   const greetingName = player.parentName ? player.parentName.split(" ")[0] : "there";
   const lines = stats.rows.length
-    ? stats.rows.map((t) => `  ${t.date} — ${t.category}${t.description ? " (" + t.description + ")" : ""}: ${t.direction === "debit" ? "+" : "-"}${fmtMoney(t.amount)}`).join("\n")
+    ? stats.rows.map((t) => `  ${t.date} — ${t.category}${t.description ? " (" + t.description + ")" : ""}: ${t.direction === "debit" ? "+" : "-"}${fmtMoney(t.amount)}${hasBreakdown(t) ? "\n      " + breakdownText(t.breakdown) : ""}`).join("\n")
     : "  No activity this month.";
   const subject = `${teamName} — ${player.name}'s Statement — ${monthLabel(month)}`;
   const body = `Hi ${greetingName},\n\nHere is ${player.name}'s account statement for ${monthLabel(month)} from ${teamName}.\n\nBeginning balance: ${fmtMoney(stats.beginning)}\nDebits (charges): ${fmtMoney(stats.debits)}\nCredits (paid): ${fmtMoney(stats.credits)}\nEnding balance: ${fmtMoney(Math.abs(stats.ending))}${stats.ending > 0.004 ? " CR" : ""}\n\nTransactions this month:\n${lines}\n\nIf you have any questions, please don't hesitate to reach out.\n\nThanks,\n${teamName}`;
@@ -367,7 +395,7 @@ async function exportTransactionsPDF(teamName, rows, playerName, monthTag) {
   const doc = new jsPDF();
   doc.setFontSize(16); doc.setTextColor(...hexToRgb(C.pitchDark)); doc.text(teamName, 14, 18);
   doc.setFontSize(10); doc.setTextColor(110, 110, 110); doc.text(`Transactions${monthTag ? " — " + monthLabel(monthTag) : ""} — generated ${todayStr()}`, 14, 24);
-  const body = rows.length ? rows.map((t) => [t.date, playerName(t.playerId), t.direction === "debit" ? "Charge" : "Payment", t.category, t.description || "—", t.direction === "debit" ? fmtMoney(t.amount) : "", t.direction === "credit" ? fmtMoney(t.amount) : ""]) : [["—", "—", "—", "No transactions match this filter", "", "", ""]];
+  const body = rows.length ? rows.map((t) => [t.date, playerName(t.playerId), t.direction === "debit" ? "Charge" : "Payment", t.category, pdfDescription(t), t.direction === "debit" ? fmtMoney(t.amount) : "", t.direction === "credit" ? fmtMoney(t.amount) : ""]) : [["—", "—", "—", "No transactions match this filter", "", "", ""]];
   doc.autoTable({ startY: 30, head: [["Date", "Player", "Type", "Category", "Description", "Debit", "Credit"]], body, styles: { fontSize: 8, cellPadding: 3 }, headStyles: { fillColor: hexToRgb(C.pitchDark), textColor: 255 }, columnStyles: { 5: { halign: "right" }, 6: { halign: "right" } }, alternateRowStyles: { fillColor: [244, 245, 240] } });
   doc.save(`${slug(teamName)}-transactions${monthTag ? "-" + monthTag : ""}.pdf`);
 }
@@ -405,7 +433,7 @@ async function exportPlayerStatementPDF(teamName, player, month, stats, periodLa
   const head = [["Date", "Category", "Description", "Debit", "Credit"].concat(withBalance ? ["Balance"] : [])];
   const emptyText = filterInfo ? "No matching transactions" : (periodLabel ? "No activity yet this season" : "No activity this month");
   const body = tableRows.length
-    ? tableRows.map((t) => { const r = [t.date, t.category, t.description || "—", t.direction === "debit" ? fmtMoney(t.amount) : "", t.direction === "credit" ? fmtMoney(t.amount) : ""]; if (withBalance) r.push(fmtMoney(t.running)); return r; })
+    ? tableRows.map((t) => { const r = [t.date, t.category, pdfDescription(t), t.direction === "debit" ? fmtMoney(t.amount) : "", t.direction === "credit" ? fmtMoney(t.amount) : ""]; if (withBalance) r.push(fmtMoney(t.running)); return r; })
     : [["—", "—", emptyText, "", ""].concat(withBalance ? [""] : [])];
   const columnStyles = { 3: { halign: "right" }, 4: { halign: "right" } };
   if (withBalance) columnStyles[5] = { halign: "right", fontStyle: "bold" };
@@ -428,6 +456,48 @@ function deriveStatementFilter(rows, filter) {
   const visible = rows.filter((t) => t.direction === dir && (cat === "*" || t.category === cat));
   const label = cat === "*" ? (dir === "debit" ? "All charges" : "All payments") : `${cat} (${dir === "debit" ? "charge" : "payment"})`;
   return { active, debitCats, creditCats, rows: visible, info: { label, direction: dir, rows: visible, total: visible.reduce((sum, t) => sum + t.amount, 0) } };
+}
+
+/* ---------------------------------------------------------------
+   Breakdown display + editor
+---------------------------------------------------------------- */
+function BreakdownNote({ b }) {
+  if (!b || !b.lines || !b.lines.length) return null;
+  const parts = breakdownParts(b);
+  return <div className="text-xs mt-1" style={{ color: C.inkSoft }}><div>{parts.itemsText}</div><div>= {parts.summaryText}</div></div>;
+}
+
+function BreakdownEditor({ lines, setLines, playerCount, setPlayerCount }) {
+  const split = computeSplit(lines, playerCount);
+  const setLine = (i, patch) => setLines(lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  const smallInput = { ...inputStyle };
+  return (
+    <div className="rounded-xl p-4" style={{ background: C.lineSoft }}>
+      <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: C.inkSoft }}>Cost lines (the total is split equally)</p>
+      <div className="grid gap-2">
+        {lines.map((l, i) => (
+          <div key={i} className="flex items-center gap-2 flex-wrap">
+            <input value={l.label} onChange={(e) => setLine(i, { label: e.target.value })} placeholder="Item" style={{ ...smallInput, width: 130 }} className="rounded-lg px-3 py-2 text-sm outline-none" />
+            <input type="number" step="0.01" min="0" value={l.amount} onChange={(e) => setLine(i, { amount: e.target.value })} placeholder="0.00" style={{ ...smallInput, width: 110 }} className="rounded-lg px-3 py-2 text-sm outline-none" />
+            <input value={l.note} onChange={(e) => setLine(i, { note: e.target.value })} placeholder="Note (optional), e.g. 420 mi × $0.70" style={{ ...smallInput, flex: 1, minWidth: 170 }} className="rounded-lg px-3 py-2 text-sm outline-none" />
+            <button onClick={() => setLines(lines.filter((_, idx) => idx !== i))} title="Remove line" className="text-sm font-semibold" style={{ color: C.debit }}>✕</button>
+          </div>
+        ))}
+      </div>
+      <button onClick={() => setLines([...lines, { label: "", amount: "", note: "" }])} className="text-xs font-semibold mt-3" style={{ color: C.pitchDark }}>+ Add line</button>
+      {setPlayerCount && (
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.inkSoft }}>Players sharing this cost</span>
+          <input type="number" min="1" step="1" value={playerCount} onChange={(e) => setPlayerCount(e.target.value)} style={{ ...smallInput, width: 90 }} className="rounded-lg px-3 py-2 text-sm outline-none" />
+        </div>
+      )}
+      <p className="text-sm font-semibold mt-3" style={{ color: C.ink }}>
+        {split.total > 0 && split.players > 0 ? (
+          <>Total {fmtMoney(split.total)} ÷ {split.players} {split.players === 1 ? "player" : "players"} = <span style={{ color: C.debit }}>{fmtMoney(split.share)} each</span>{!split.exact && <span className="text-xs font-normal" style={{ color: C.inkSoft }}> (rounded to the nearest cent)</span>}</>
+        ) : split.total > 0 ? "Tick the players below to see each share." : "Enter at least one cost line."}
+      </p>
+    </div>
+  );
 }
 
 /* ---------------------------------------------------------------
@@ -514,7 +584,7 @@ function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, o
             <thead><tr className="text-left" style={{ color: C.inkSoft }}><th className="font-semibold pb-2">Date</th><th className="font-semibold pb-2">Category</th><th className="font-semibold pb-2">Description</th><th className="font-semibold pb-2 text-right">Debit</th><th className="font-semibold pb-2 text-right">Credit</th>{!filterInfo && <th className="font-semibold pb-2 text-right">Balance</th>}</tr></thead>
             <tbody>{visibleRows.map((t) => (
               <tr key={t.id} className="border-t" style={{ borderColor: C.lineSoft }}>
-                <td className="py-2" style={{ color: C.ink }}>{t.date}</td><td className="py-2" style={{ color: C.ink }}>{t.category}</td><td className="py-2" style={{ color: C.inkSoft }}>{t.description || "—"}</td>
+                <td className="py-2" style={{ color: C.ink }}>{t.date}</td><td className="py-2" style={{ color: C.ink }}>{t.category}</td><td className="py-2" style={{ color: C.inkSoft }}>{t.description || (hasBreakdown(t) ? "" : "—")}<BreakdownNote b={t.breakdown} /></td>
                 <td className="py-2 text-right font-semibold" style={{ color: C.debit }}>{t.direction === "debit" ? fmtMoney(t.amount) : ""}</td>
                 <td className="py-2 text-right font-semibold" style={{ color: C.credit }}>{t.direction === "credit" ? fmtMoney(t.amount) : ""}</td>
                 {!filterInfo && <td className="py-2 text-right font-bold" style={{ color: C.ink, fontVariantNumeric: "tabular-nums" }}>{fmtMoney(t.running)}</td>}
@@ -777,7 +847,7 @@ function RosterTab({ teamName, players, ledger, addPlayer, addPlayersBulk, updat
 function TransactionsTab({ teamName, players, transactions, addTxn, addBulkTxn, deleteTxn, updateTxn, presetPlayerId }) {
   const [mode, setMode] = useState("single");
   const [form, setForm] = useState({ playerId: presetPlayerId || (players[0]?.id ?? ""), date: todayStr(), direction: "debit", category: DEBIT_CATEGORIES[0], amount: "", description: "" });
-  const [bulkForm, setBulkForm] = useState({ date: todayStr(), direction: "debit", category: DEBIT_CATEGORIES[0], amount: "", description: "" });
+  const [bulkForm, setBulkForm] = useState({ date: todayStr(), direction: "debit", category: DEBIT_CATEGORIES[0], amount: "", description: "", itemize: false, lines: defaultCoachLines() });
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkQuery, setBulkQuery] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -786,6 +856,14 @@ function TransactionsTab({ teamName, players, transactions, addTxn, addBulkTxn, 
   useEffect(() => { if (presetPlayerId) setForm((f) => ({ ...f, playerId: presetPlayerId })); }, [presetPlayerId]);
   const cats = form.direction === "debit" ? DEBIT_CATEGORIES : CREDIT_CATEGORIES;
   const bulkCats = bulkForm.direction === "debit" ? DEBIT_CATEGORIES : CREDIT_CATEGORIES;
+  const bulkItemized = bulkForm.itemize && bulkForm.direction === "debit";
+  const bulkSplit = computeSplit(bulkForm.lines, selectedIds.size);
+  // Choosing "Coach Fee" turns on the itemized split (Hotel / Mileage / Food) automatically.
+  const changeBulkCategory = (cat) => setBulkForm((f) => {
+    const isCoach = cat === "Coach Fee" && f.direction === "debit";
+    const hasEntered = f.lines.some((l) => String(l.amount).trim() !== "");
+    return { ...f, category: cat, itemize: isCoach, lines: isCoach && !hasEntered ? defaultCoachLines() : f.lines };
+  });
   const numberOf = useMemo(() => players.reduce((acc, p, idx) => (acc[p.id] = idx + 1, acc), {}), [players]);
 
   const submit = async () => {
@@ -797,14 +875,30 @@ function TransactionsTab({ teamName, players, transactions, addTxn, addBulkTxn, 
   const [editingTxnId, setEditingTxnId] = useState(null);
   const [editTxnForm, setEditTxnForm] = useState(null);
   const editTxnCats = editTxnForm?.direction === "debit" ? DEBIT_CATEGORIES : CREDIT_CATEGORIES;
+  const editItemized = !!editTxnForm && editTxnForm.direction === "debit" && editTxnForm.itemize;
+  const editSplit = editTxnForm ? computeSplit(editTxnForm.lines, editTxnForm.players) : null;
   const legacyEditCat = editTxnForm && editTxnForm.category && !editTxnCats.includes(editTxnForm.category) ? editTxnForm.category : null;
   const startEditTxn = (t) => {
     setEditingTxnId(t.id);
-    setEditTxnForm({ playerId: t.playerId, date: t.date, direction: t.direction, category: t.category, amount: String(t.amount), description: t.description || "" });
+    const b = hasBreakdown(t) ? t.breakdown : null;
+    setEditTxnForm({
+      playerId: t.playerId, date: t.date, direction: t.direction, category: t.category, amount: String(t.amount), description: t.description || "",
+      itemize: !!b, hadBreakdown: !!b,
+      lines: b ? b.lines.map((l) => ({ label: l.label, amount: String(l.amount), note: l.note || "" })) : (t.category === "Coach Fee" ? defaultCoachLines() : [{ label: "", amount: "", note: "" }]),
+      players: b ? String(b.players) : "",
+    });
   };
   const saveEditTxn = async () => {
-    if (!editTxnForm.playerId || !editTxnForm.amount || Number(editTxnForm.amount) <= 0) return;
-    await updateTxn(editingTxnId, { playerId: editTxnForm.playerId, date: editTxnForm.date, direction: editTxnForm.direction, category: editTxnForm.category, amount: parseFloat(editTxnForm.amount), description: editTxnForm.description.trim() });
+    if (!editTxnForm.playerId) return;
+    const itemized = editTxnForm.direction === "debit" && editTxnForm.itemize;
+    const split = computeSplit(editTxnForm.lines, editTxnForm.players);
+    let amount;
+    if (itemized) { if (split.total <= 0 || split.players <= 0) return; amount = split.share; }
+    else { if (!editTxnForm.amount || Number(editTxnForm.amount) <= 0) return; amount = parseFloat(editTxnForm.amount); }
+    const patch = { playerId: editTxnForm.playerId, date: editTxnForm.date, direction: editTxnForm.direction, category: editTxnForm.category, amount, description: editTxnForm.description.trim() };
+    if (itemized) patch.breakdown = { lines: split.lines, total: split.total, players: split.players, share: split.share, exact: split.exact };
+    else if (editTxnForm.hadBreakdown) patch.breakdown = window.firebase.firestore.FieldValue.delete();
+    await updateTxn(editingTxnId, patch);
     setEditingTxnId(null); setEditTxnForm(null);
   };
 
@@ -815,14 +909,18 @@ function TransactionsTab({ teamName, players, transactions, addTxn, addBulkTxn, 
   const selectActiveOnly = () => setSelectedIds(new Set(players.filter((p) => p.active).map((p) => p.id)));
 
   const submitBulk = async () => {
-    if (selectedIds.size === 0 || !bulkForm.amount || Number(bulkForm.amount) <= 0) return;
+    if (selectedIds.size === 0) return;
+    if (bulkItemized ? bulkSplit.total <= 0 : (!bulkForm.amount || Number(bulkForm.amount) <= 0)) return;
     setBulkBusy(true); setBulkMsg("");
     try {
       const ids = Array.from(selectedIds);
-      await addBulkTxn(ids, { date: bulkForm.date, direction: bulkForm.direction, category: bulkForm.category, amount: parseFloat(bulkForm.amount), description: bulkForm.description.trim(), createdAt: Date.now() });
-      setBulkMsg(`${bulkForm.direction === "debit" ? "Charged" : "Credited"} ${ids.length} player${ids.length === 1 ? "" : "s"} ${fmtMoney(parseFloat(bulkForm.amount))} each.`);
+      const amount = bulkItemized ? bulkSplit.share : parseFloat(bulkForm.amount);
+      const base = { date: bulkForm.date, direction: bulkForm.direction, category: bulkForm.category, amount, description: bulkForm.description.trim(), createdAt: Date.now() };
+      if (bulkItemized) base.breakdown = { lines: bulkSplit.lines, total: bulkSplit.total, players: bulkSplit.players, share: bulkSplit.share, exact: bulkSplit.exact };
+      await addBulkTxn(ids, base);
+      setBulkMsg(`${bulkForm.direction === "debit" ? "Charged" : "Credited"} ${ids.length} player${ids.length === 1 ? "" : "s"} ${fmtMoney(amount)} each.`);
       setSelectedIds(new Set());
-      setBulkForm({ ...bulkForm, amount: "", description: "" });
+      setBulkForm({ ...bulkForm, amount: "", description: "", lines: defaultCoachLines() });
     } catch (e) { setBulkMsg("Something went wrong — please try again."); }
     setBulkBusy(false);
   };
@@ -858,13 +956,20 @@ function TransactionsTab({ teamName, players, transactions, addTxn, addBulkTxn, 
           <div className="grid sm:grid-cols-3 gap-3 mb-4">
             <Field label="Date"><TextInput type="date" value={bulkForm.date} onChange={(e) => setBulkForm({ ...bulkForm, date: e.target.value })} /></Field>
             <Field label="Type"><div className="flex rounded-lg overflow-hidden" style={{ border: `1px solid ${C.line}` }}>
-              <button onClick={() => setBulkForm({ ...bulkForm, direction: "debit", category: DEBIT_CATEGORIES[0] })} className="flex-1 py-2 text-sm font-semibold" style={{ background: bulkForm.direction === "debit" ? C.debitTint : "transparent", color: bulkForm.direction === "debit" ? C.debit : C.inkSoft }}>Charge</button>
-              <button onClick={() => setBulkForm({ ...bulkForm, direction: "credit", category: CREDIT_CATEGORIES[0] })} className="flex-1 py-2 text-sm font-semibold" style={{ background: bulkForm.direction === "credit" ? C.creditTint : "transparent", color: bulkForm.direction === "credit" ? C.credit : C.inkSoft }}>Payment</button>
+              <button onClick={() => setBulkForm({ ...bulkForm, direction: "debit", category: DEBIT_CATEGORIES[0], itemize: false })} className="flex-1 py-2 text-sm font-semibold" style={{ background: bulkForm.direction === "debit" ? C.debitTint : "transparent", color: bulkForm.direction === "debit" ? C.debit : C.inkSoft }}>Charge</button>
+              <button onClick={() => setBulkForm({ ...bulkForm, direction: "credit", category: CREDIT_CATEGORIES[0], itemize: false })} className="flex-1 py-2 text-sm font-semibold" style={{ background: bulkForm.direction === "credit" ? C.creditTint : "transparent", color: bulkForm.direction === "credit" ? C.credit : C.inkSoft }}>Payment</button>
             </div></Field>
-            <Field label="Category"><Select value={bulkForm.category} onChange={(e) => setBulkForm({ ...bulkForm, category: e.target.value })}>{bulkCats.map((c) => <option key={c} value={c}>{c}</option>)}</Select></Field>
-            <Field label="Amount (each)"><TextInput type="number" step="0.01" min="0" value={bulkForm.amount} onChange={(e) => setBulkForm({ ...bulkForm, amount: e.target.value })} placeholder="0.00" /></Field>
+            <Field label="Category"><Select value={bulkForm.category} onChange={(e) => changeBulkCategory(e.target.value)}>{bulkCats.map((c) => <option key={c} value={c}>{c}</option>)}</Select></Field>
+            <Field label="Amount (each)">{bulkItemized ? <div className="rounded-lg px-3 py-2 text-sm font-bold" style={{ border: `1px solid ${C.line}`, background: C.lineSoft, color: C.ink }}>{bulkSplit.total > 0 && bulkSplit.players > 0 ? fmtMoney(bulkSplit.share) : "—"}</div> : <TextInput type="number" step="0.01" min="0" value={bulkForm.amount} onChange={(e) => setBulkForm({ ...bulkForm, amount: e.target.value })} placeholder="0.00" />}</Field>
             <div className="sm:col-span-2"><Field label="Description (optional)"><TextInput value={bulkForm.description} onChange={(e) => setBulkForm({ ...bulkForm, description: e.target.value })} placeholder="e.g. Fall registration" /></Field></div>
           </div>
+          {bulkForm.direction === "debit" && (
+            <label className="flex items-center gap-2 text-sm mb-3" style={{ color: C.ink }}>
+              <input type="checkbox" checked={bulkForm.itemize} onChange={(e) => setBulkForm({ ...bulkForm, itemize: e.target.checked })} />
+              Itemize this charge and show families how it's calculated (split equally)
+            </label>
+          )}
+          {bulkItemized && <div className="mb-4"><BreakdownEditor lines={bulkForm.lines} setLines={(l) => setBulkForm({ ...bulkForm, lines: l })} playerCount={selectedIds.size} /></div>}
 
           <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
             <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.inkSoft }}>Select players — {selectedIds.size} selected</p>
@@ -904,9 +1009,18 @@ function TransactionsTab({ teamName, players, transactions, addTxn, addBulkTxn, 
               <button onClick={() => setEditTxnForm({ ...editTxnForm, direction: "credit", category: CREDIT_CATEGORIES[0] })} className="flex-1 py-2 text-sm font-semibold" style={{ background: editTxnForm.direction === "credit" ? C.creditTint : "transparent", color: editTxnForm.direction === "credit" ? C.credit : C.inkSoft }}>Payment</button>
             </div></Field>
             <Field label="Category"><Select value={editTxnForm.category} onChange={(e) => setEditTxnForm({ ...editTxnForm, category: e.target.value })}>{legacyEditCat && <option key={legacyEditCat} value={legacyEditCat}>{legacyEditCat} (previous label)</option>}{editTxnCats.map((c) => <option key={c} value={c}>{c}</option>)}</Select></Field>
-            <Field label="Amount"><TextInput type="number" step="0.01" min="0" value={editTxnForm.amount} onChange={(e) => setEditTxnForm({ ...editTxnForm, amount: e.target.value })} /></Field>
+            <Field label="Amount">{editItemized ? <div className="rounded-lg px-3 py-2 text-sm font-bold" style={{ border: `1px solid ${C.line}`, background: C.lineSoft, color: C.ink }}>{editSplit.total > 0 && editSplit.players > 0 ? fmtMoney(editSplit.share) : "—"}</div> : <TextInput type="number" step="0.01" min="0" value={editTxnForm.amount} onChange={(e) => setEditTxnForm({ ...editTxnForm, amount: e.target.value })} />}</Field>
             <Field label="Description (optional)"><TextInput value={editTxnForm.description} onChange={(e) => setEditTxnForm({ ...editTxnForm, description: e.target.value })} /></Field>
           </div>
+          {editTxnForm.direction === "debit" && (
+            <div className="mt-4">
+              <label className="flex items-center gap-2 text-sm mb-3" style={{ color: C.ink }}>
+                <input type="checkbox" checked={editTxnForm.itemize} onChange={(e) => setEditTxnForm({ ...editTxnForm, itemize: e.target.checked })} />
+                Itemize this charge and show the family how it's calculated
+              </label>
+              {editItemized && <BreakdownEditor lines={editTxnForm.lines} setLines={(l) => setEditTxnForm({ ...editTxnForm, lines: l })} playerCount={editTxnForm.players} setPlayerCount={(v) => setEditTxnForm({ ...editTxnForm, players: v })} />}
+            </div>
+          )}
           <div className="flex gap-2 mt-4"><Button onClick={saveEditTxn}>✓ Save changes</Button><Button variant="ghost" onClick={() => { setEditingTxnId(null); setEditTxnForm(null); }}>Cancel</Button></div>
         </div>
       )}
@@ -925,7 +1039,7 @@ function TransactionsTab({ teamName, players, transactions, addTxn, addBulkTxn, 
               <tr key={t.id} className="border-t" style={{ borderColor: C.lineSoft }}>
                 <td className="px-4 py-3" style={{ color: C.ink }}>{t.date}</td><td className="px-4 py-3 font-semibold" style={{ color: C.ink }}>{playerName(t.playerId)}</td>
                 <td className="px-4 py-3"><span className="text-xs font-semibold px-2 py-1 rounded-full" style={{ background: t.direction === "debit" ? C.debitTint : C.creditTint, color: t.direction === "debit" ? C.debit : C.credit }}>{t.category}</span></td>
-                <td className="px-4 py-3" style={{ color: C.inkSoft }}>{t.description || "—"}</td>
+                <td className="px-4 py-3" style={{ color: C.inkSoft }}>{t.description || (hasBreakdown(t) ? "" : "—")}<BreakdownNote b={t.breakdown} /></td>
                 <td className="px-4 py-3 text-right font-bold" style={{ color: t.direction === "debit" ? C.debit : C.credit, fontVariantNumeric: "tabular-nums" }}>{t.direction === "debit" ? "−" : "+"}{fmtMoney(t.amount)}</td>
                 <td className="px-4 py-3 text-right"><div className="flex items-center justify-end gap-3">
                   <button onClick={() => startEditTxn(t)} className="text-xs font-semibold" style={{ color: C.pitchDark }}>Edit</button>
