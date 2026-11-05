@@ -333,7 +333,18 @@ function buildLedger(players, transactions) {
     });
     return { beginning, debits, credits, ending: beginning + credits - debits, rows };
   };
-  return { currentBalance, monthStats };
+  const seasonStats = (playerId) => {
+    const p = players.find((pl) => pl.id === playerId);
+    const beginning = Number(p?.openingBalance) || 0;
+    let debits = 0, credits = 0, running = beginning;
+    const rows = (byPlayer[playerId] || []).map((t) => {
+      running += t.direction === "credit" ? t.amount : -t.amount;
+      if (t.direction === "debit") debits += t.amount; else credits += t.amount;
+      return { ...t, running };
+    });
+    return { beginning, debits, credits, ending: beginning + credits - debits, rows };
+  };
+  return { currentBalance, monthStats, seasonStats };
 }
 function useLedger(players, transactions) {
   return useMemo(() => buildLedger(players, transactions), [players, transactions]);
@@ -369,28 +380,29 @@ async function exportSummaryPDF(teamName, summary, totals, month) {
   doc.autoTable({ startY: 32, head: [["#", "Player", "Beginning", "Debits", "Credits", "Ending"]], body, foot: [["", "Team total", fmtMoney(totals.beginning), fmtMoney(totals.debits), fmtMoney(totals.credits), fmtMoney(totals.ending)]], styles: { fontSize: 9, cellPadding: 3 }, headStyles: { fillColor: hexToRgb(C.pitchDark), textColor: 255 }, footStyles: { fillColor: hexToRgb(C.lineSoft), textColor: hexToRgb(C.ink), fontStyle: "bold" }, columnStyles: { 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } }, alternateRowStyles: { fillColor: [244, 245, 240] } });
   doc.save(`${slug(teamName)}-statement-${month}.pdf`);
 }
-async function exportPlayerStatementPDF(teamName, player, month, stats) {
+async function exportPlayerStatementPDF(teamName, player, month, stats, periodLabel) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
   doc.setFontSize(16); doc.setTextColor(...hexToRgb(C.pitchDark)); doc.text(teamName, 14, 18);
-  doc.setFontSize(10); doc.setTextColor(110, 110, 110); doc.text(`Account Statement — ${monthLabel(month)}`, 14, 24);
+  doc.setFontSize(10); doc.setTextColor(110, 110, 110); doc.text(`Account Statement — ${periodLabel || monthLabel(month)}`, 14, 24);
   doc.setFontSize(13); doc.setTextColor(...hexToRgb(C.ink)); doc.text(player.name, 14, 36);
   doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
   doc.text("BEGINNING BALANCE", 14, 46); doc.text("DEBITS", 84, 46); doc.text("CREDITS", 124, 46); doc.text("ENDING BALANCE", 164, 46);
   doc.setFontSize(12); doc.setTextColor(...hexToRgb(C.ink)); doc.text(fmtMoney(stats.beginning), 14, 53);
   doc.setTextColor(...hexToRgb(C.debit)); doc.text(stats.debits ? fmtMoney(stats.debits) : "—", 84, 53);
   doc.setTextColor(...hexToRgb(C.credit)); doc.text(stats.credits ? fmtMoney(stats.credits) : "—", 124, 53);
-  const endColor = stats.ending > 0.004 ? C.debit : stats.ending < -0.004 ? C.credit : C.ink;
-  doc.setTextColor(...hexToRgb(endColor)); doc.text(fmtMoney(Math.abs(stats.ending)) + (stats.ending < -0.004 ? " CR" : ""), 164, 53);
-  const body = stats.rows.length ? stats.rows.map((t) => [t.date, t.category, t.description || "—", t.direction === "debit" ? fmtMoney(t.amount) : "", t.direction === "credit" ? fmtMoney(t.amount) : "", fmtMoney(t.running)]) : [["—", "—", "No activity this month", "", "", ""]];
+  const endColor = stats.ending < -0.004 ? C.debit : stats.ending > 0.004 ? C.credit : C.ink;
+  doc.setTextColor(...hexToRgb(endColor)); doc.text(fmtMoney(Math.abs(stats.ending)) + (stats.ending > 0.004 ? " CR" : ""), 164, 53);
+  const body = stats.rows.length ? stats.rows.map((t) => [t.date, t.category, t.description || "—", t.direction === "debit" ? fmtMoney(t.amount) : "", t.direction === "credit" ? fmtMoney(t.amount) : "", fmtMoney(t.running)]) : [["—", "—", periodLabel ? "No activity yet this season" : "No activity this month", "", "", ""]];
   doc.autoTable({ startY: 62, head: [["Date", "Category", "Description", "Debit", "Credit", "Balance"]], body, styles: { fontSize: 9, cellPadding: 3 }, headStyles: { fillColor: hexToRgb(C.pitchDark), textColor: 255 }, columnStyles: { 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right", fontStyle: "bold" } }, alternateRowStyles: { fillColor: [244, 245, 240] } });
-  doc.save(`${slug(player.name)}-statement-${month}.pdf`);
+  doc.save(`${slug(player.name)}-statement-${periodLabel ? "season" : month}.pdf`);
 }
 
 /* ---------------------------------------------------------------
    Statement detail (shared by admin drill-down + parent view)
 ---------------------------------------------------------------- */
-function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, onBack, allowEmail, monthHint }) {
+function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, onBack, allowEmail, monthHint, period }) {
+  const isSeason = period === "season";
   const [emailHint, setEmailHint] = useState(false);
   const [emailBusy, setEmailBusy] = useState(false);
   const emailWithPdf = async () => {
@@ -408,8 +420,8 @@ function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, o
       <div className="flex items-center justify-between mb-3 print:hidden flex-wrap gap-2">
         {onBack ? <button onClick={onBack} className="text-sm font-semibold" style={{ color: C.pitchDark }}>← Back to summary</button> : <div />}
         <div className="flex items-center gap-2 flex-wrap">
-          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={inputStyle} className={`${inputClass} w-auto`} />
-          <ExportButton onExport={() => exportPlayerStatementPDF(teamName, player, month, stats)} />
+          {!isSeason && <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={inputStyle} className={`${inputClass} w-auto`} />}
+          <ExportButton onExport={() => exportPlayerStatementPDF(teamName, player, month, stats, isSeason ? "Full season to date" : undefined)} />
           <Button variant="ghost" onClick={() => window.print()}>🖨 Print</Button>
           {allowEmail && (player.parentEmail ? (
             <Button variant="ghost" disabled={emailBusy} onClick={emailWithPdf}>{emailBusy ? <Spinner size={14} /> : "✉"} Email to parent</Button>
@@ -418,7 +430,7 @@ function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, o
           ))}
         </div>
       </div>
-      {monthHint && (
+      {monthHint && !isSeason && (
         <p className="text-xs mb-3 print:hidden" style={{ color: C.inkSoft }}>📅 Pick a different month above to see past statements.</p>
       )}
       {emailHint && (
@@ -430,7 +442,7 @@ function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, o
         <div className="flex items-start justify-between flex-wrap gap-3 border-b pb-4 mb-4" style={{ borderColor: C.lineSoft }}>
           <div className="flex items-center gap-3">
             {jerseyNo != null && <JerseyBadge n={jerseyNo} />}
-            <div><p className="text-lg font-black" style={{ color: C.ink }}>{player.name}</p><p className="text-xs" style={{ color: C.inkSoft }}>Statement · {monthLabel(month)}</p></div>
+            <div><p className="text-lg font-black" style={{ color: C.ink }}>{player.name}</p><p className="text-xs" style={{ color: C.inkSoft }}>Statement · {isSeason ? "Full season to date" : monthLabel(month)}</p></div>
           </div>
           <div className="text-right"><p className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.inkSoft }}>Ending balance</p><MoneyText value={stats.ending} size="lg" /></div>
         </div>
@@ -439,7 +451,7 @@ function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, o
           <div className="rounded-xl p-3" style={{ background: C.debitTint }}><p className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.debit }}>Debits (charges)</p><span className="text-base font-bold" style={{ color: C.debit }}>{fmtMoney(stats.debits)}</span></div>
           <div className="rounded-xl p-3" style={{ background: C.creditTint }}><p className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.credit }}>Credits (paid)</p><span className="text-base font-bold" style={{ color: C.credit }}>{fmtMoney(stats.credits)}</span></div>
         </div>
-        {stats.rows.length === 0 ? <p className="text-sm text-center py-6" style={{ color: C.inkSoft }}>No activity this month.</p> : (
+        {stats.rows.length === 0 ? <p className="text-sm text-center py-6" style={{ color: C.inkSoft }}>{isSeason ? "No activity yet this season." : "No activity this month."}</p> : (
           <div>
           <p className="scroll-hint items-center gap-1.5 text-xs font-semibold mb-2" style={{ color: C.inkSoft }}>↔ Swipe to see all columns</p>
           <div className="table-scroll">
@@ -1461,10 +1473,11 @@ function ParentView({ teamName, parentMessage, venmoUsername, treasurerEmail, pl
   const ledger = useLedger(players, transactions);
   const [month, setMonth] = useState(thisMonthStr());
   const [showPay, setShowPay] = useState(false);
+  const [view, setView] = useState("month");
   const player = players.find((p) => p.id === playerId);
   const idx = players.findIndex((p) => p.id === playerId);
   if (!player) return null;
-  const stats = ledger.monthStats(playerId, month);
+  const stats = view === "season" ? ledger.seasonStats(playerId) : ledger.monthStats(playerId, month);
   const balance = ledger.currentBalance(playerId);
   const label = balance < -0.004 ? "Amount due" : balance > 0.004 ? "Credit balance" : "Paid in full";
   const venmoLink = venmoUsername ? `https://venmo.com/${venmoUsername}?txn=pay&note=${encodeURIComponent(`${player.name} (${teamName})`)}` : null;
@@ -1503,7 +1516,11 @@ function ParentView({ teamName, parentMessage, venmoUsername, treasurerEmail, pl
             )}
           </div>
         )}
-        <StatementDetail teamName={teamName} player={player} month={month} setMonth={setMonth} stats={stats} monthHint />
+        <div className="inline-flex rounded-lg overflow-hidden mb-4 print:hidden" style={{ border: `1px solid ${C.line}` }}>
+          <button onClick={() => setView("month")} className="px-3 py-2 text-sm font-semibold" style={{ background: view === "month" ? C.pitchTint : "transparent", color: view === "month" ? C.pitchDark : C.inkSoft }}>Monthly statement</button>
+          <button onClick={() => setView("season")} className="px-3 py-2 text-sm font-semibold" style={{ background: view === "season" ? C.pitchTint : "transparent", color: view === "season" ? C.pitchDark : C.inkSoft }}>Full season</button>
+        </div>
+        <StatementDetail teamName={teamName} player={player} month={month} setMonth={setMonth} stats={stats} period={view} monthHint />
       </main>
     </div>
   );
