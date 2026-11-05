@@ -380,22 +380,54 @@ async function exportSummaryPDF(teamName, summary, totals, month) {
   doc.autoTable({ startY: 32, head: [["#", "Player", "Beginning", "Debits", "Credits", "Ending"]], body, foot: [["", "Team total", fmtMoney(totals.beginning), fmtMoney(totals.debits), fmtMoney(totals.credits), fmtMoney(totals.ending)]], styles: { fontSize: 9, cellPadding: 3 }, headStyles: { fillColor: hexToRgb(C.pitchDark), textColor: 255 }, footStyles: { fillColor: hexToRgb(C.lineSoft), textColor: hexToRgb(C.ink), fontStyle: "bold" }, columnStyles: { 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } }, alternateRowStyles: { fillColor: [244, 245, 240] } });
   doc.save(`${slug(teamName)}-statement-${month}.pdf`);
 }
-async function exportPlayerStatementPDF(teamName, player, month, stats, periodLabel) {
+async function exportPlayerStatementPDF(teamName, player, month, stats, periodLabel, filterInfo) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
+  const titleLabel = (periodLabel || monthLabel(month)) + (filterInfo ? " — " + filterInfo.label : "");
   doc.setFontSize(16); doc.setTextColor(...hexToRgb(C.pitchDark)); doc.text(teamName, 14, 18);
-  doc.setFontSize(10); doc.setTextColor(110, 110, 110); doc.text(`Account Statement — ${periodLabel || monthLabel(month)}`, 14, 24);
+  doc.setFontSize(10); doc.setTextColor(110, 110, 110); doc.text(`Account Statement — ${titleLabel}`, 14, 24);
   doc.setFontSize(13); doc.setTextColor(...hexToRgb(C.ink)); doc.text(player.name, 14, 36);
   doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
-  doc.text("BEGINNING BALANCE", 14, 46); doc.text("DEBITS", 84, 46); doc.text("CREDITS", 124, 46); doc.text("ENDING BALANCE", 164, 46);
-  doc.setFontSize(12); doc.setTextColor(...hexToRgb(C.ink)); doc.text(fmtMoney(stats.beginning), 14, 53);
-  doc.setTextColor(...hexToRgb(C.debit)); doc.text(stats.debits ? fmtMoney(stats.debits) : "—", 84, 53);
-  doc.setTextColor(...hexToRgb(C.credit)); doc.text(stats.credits ? fmtMoney(stats.credits) : "—", 124, 53);
-  const endColor = stats.ending < -0.004 ? C.debit : stats.ending > 0.004 ? C.credit : C.ink;
-  doc.setTextColor(...hexToRgb(endColor)); doc.text(fmtMoney(Math.abs(stats.ending)) + (stats.ending > 0.004 ? " CR" : ""), 164, 53);
-  const body = stats.rows.length ? stats.rows.map((t) => [t.date, t.category, t.description || "—", t.direction === "debit" ? fmtMoney(t.amount) : "", t.direction === "credit" ? fmtMoney(t.amount) : "", fmtMoney(t.running)]) : [["—", "—", periodLabel ? "No activity yet this season" : "No activity this month", "", "", ""]];
-  doc.autoTable({ startY: 62, head: [["Date", "Category", "Description", "Debit", "Credit", "Balance"]], body, styles: { fontSize: 9, cellPadding: 3 }, headStyles: { fillColor: hexToRgb(C.pitchDark), textColor: 255 }, columnStyles: { 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right", fontStyle: "bold" } }, alternateRowStyles: { fillColor: [244, 245, 240] } });
-  doc.save(`${slug(player.name)}-statement-${periodLabel ? "season" : month}.pdf`);
+  if (filterInfo) {
+    doc.text("ENTRIES", 14, 46); doc.text("TOTAL", 84, 46);
+    doc.setFontSize(12); doc.setTextColor(...hexToRgb(C.ink)); doc.text(String(filterInfo.rows.length), 14, 53);
+    doc.setTextColor(...hexToRgb(filterInfo.direction === "debit" ? C.debit : C.credit)); doc.text(fmtMoney(filterInfo.total), 84, 53);
+  } else {
+    doc.text("BEGINNING BALANCE", 14, 46); doc.text("DEBITS", 84, 46); doc.text("CREDITS", 124, 46); doc.text("ENDING BALANCE", 164, 46);
+    doc.setFontSize(12); doc.setTextColor(...hexToRgb(C.ink)); doc.text(fmtMoney(stats.beginning), 14, 53);
+    doc.setTextColor(...hexToRgb(C.debit)); doc.text(stats.debits ? fmtMoney(stats.debits) : "—", 84, 53);
+    doc.setTextColor(...hexToRgb(C.credit)); doc.text(stats.credits ? fmtMoney(stats.credits) : "—", 124, 53);
+    const endColor = stats.ending < -0.004 ? C.debit : stats.ending > 0.004 ? C.credit : C.ink;
+    doc.setTextColor(...hexToRgb(endColor)); doc.text(fmtMoney(Math.abs(stats.ending)) + (stats.ending > 0.004 ? " CR" : ""), 164, 53);
+  }
+  const tableRows = filterInfo ? filterInfo.rows : stats.rows;
+  const withBalance = !filterInfo;
+  const head = [["Date", "Category", "Description", "Debit", "Credit"].concat(withBalance ? ["Balance"] : [])];
+  const emptyText = filterInfo ? "No matching transactions" : (periodLabel ? "No activity yet this season" : "No activity this month");
+  const body = tableRows.length
+    ? tableRows.map((t) => { const r = [t.date, t.category, t.description || "—", t.direction === "debit" ? fmtMoney(t.amount) : "", t.direction === "credit" ? fmtMoney(t.amount) : ""]; if (withBalance) r.push(fmtMoney(t.running)); return r; })
+    : [["—", "—", emptyText, "", ""].concat(withBalance ? [""] : [])];
+  const columnStyles = { 3: { halign: "right" }, 4: { halign: "right" } };
+  if (withBalance) columnStyles[5] = { halign: "right", fontStyle: "bold" };
+  doc.autoTable({ startY: 62, head, body, styles: { fontSize: 9, cellPadding: 3 }, headStyles: { fillColor: hexToRgb(C.pitchDark), textColor: 255 }, columnStyles, alternateRowStyles: { fillColor: [244, 245, 240] } });
+  doc.save(`${slug(player.name)}-statement-${periodLabel ? "season" : month}${filterInfo ? "-" + slug(filterInfo.label) : ""}.pdf`);
+}
+
+// Works out which transactions a "Show" filter selects, plus the total, for the full-season statement.
+// A filter value is "all", "debit|*" (all charges), "credit|*" (all payments), or "debit|<category>" / "credit|<category>".
+function deriveStatementFilter(rows, filter) {
+  const cats = (dir) => [...new Set(rows.filter((t) => t.direction === dir).map((t) => t.category))].sort();
+  const debitCats = cats("debit"), creditCats = cats("credit");
+  const known = filter === "all" || filter === "debit|*" || filter === "credit|*" ||
+    (filter.indexOf("debit|") === 0 && debitCats.includes(filter.slice(6))) ||
+    (filter.indexOf("credit|") === 0 && creditCats.includes(filter.slice(7)));
+  const active = known ? filter : "all";
+  if (active === "all") return { active, debitCats, creditCats, rows, info: null };
+  const sep = active.indexOf("|");
+  const dir = active.slice(0, sep), cat = active.slice(sep + 1);
+  const visible = rows.filter((t) => t.direction === dir && (cat === "*" || t.category === cat));
+  const label = cat === "*" ? (dir === "debit" ? "All charges" : "All payments") : `${cat} (${dir === "debit" ? "charge" : "payment"})`;
+  return { active, debitCats, creditCats, rows: visible, info: { label, direction: dir, rows: visible, total: visible.reduce((sum, t) => sum + t.amount, 0) } };
 }
 
 /* ---------------------------------------------------------------
@@ -403,6 +435,10 @@ async function exportPlayerStatementPDF(teamName, player, month, stats, periodLa
 ---------------------------------------------------------------- */
 function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, onBack, allowEmail, monthHint, period }) {
   const isSeason = period === "season";
+  const [filter, setFilter] = useState("all");
+  const sf = deriveStatementFilter(stats.rows, isSeason ? filter : "all");
+  const { debitCats, creditCats } = sf;
+  const activeFilter = sf.active, filterInfo = sf.info, visibleRows = sf.rows;
   const [emailHint, setEmailHint] = useState(false);
   const [emailBusy, setEmailBusy] = useState(false);
   const emailWithPdf = async () => {
@@ -421,7 +457,7 @@ function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, o
         {onBack ? <button onClick={onBack} className="text-sm font-semibold" style={{ color: C.pitchDark }}>← Back to summary</button> : <div />}
         <div className="flex items-center gap-2 flex-wrap">
           {!isSeason && <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} style={inputStyle} className={`${inputClass} w-auto`} />}
-          <ExportButton onExport={() => exportPlayerStatementPDF(teamName, player, month, stats, isSeason ? "Full season to date" : undefined)} />
+          <ExportButton onExport={() => exportPlayerStatementPDF(teamName, player, month, stats, isSeason ? "Full season to date" : undefined, filterInfo)} />
           <Button variant="ghost" onClick={() => window.print()}>🖨 Print</Button>
           {allowEmail && (player.parentEmail ? (
             <Button variant="ghost" disabled={emailBusy} onClick={emailWithPdf}>{emailBusy ? <Spinner size={14} /> : "✉"} Email to parent</Button>
@@ -451,18 +487,37 @@ function StatementDetail({ teamName, player, jerseyNo, month, setMonth, stats, o
           <div className="rounded-xl p-3" style={{ background: C.debitTint }}><p className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.debit }}>Debits (charges)</p><span className="text-base font-bold" style={{ color: C.debit }}>{fmtMoney(stats.debits)}</span></div>
           <div className="rounded-xl p-3" style={{ background: C.creditTint }}><p className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.credit }}>Credits (paid)</p><span className="text-base font-bold" style={{ color: C.credit }}>{fmtMoney(stats.credits)}</span></div>
         </div>
-        {stats.rows.length === 0 ? <p className="text-sm text-center py-6" style={{ color: C.inkSoft }}>{isSeason ? "No activity yet this season." : "No activity this month."}</p> : (
+        {isSeason && stats.rows.length > 0 && (
+          <div className="flex items-center gap-3 flex-wrap mb-4 print:hidden">
+            <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.inkSoft }}>Show</span>
+            <select value={activeFilter} onChange={(e) => setFilter(e.target.value)} style={{ ...inputStyle, width: "auto" }} className="rounded-lg px-3 py-2 text-sm outline-none">
+              <option value="all">All activity</option>
+              <option value="debit|*">All charges</option>
+              <option value="credit|*">All payments</option>
+              {debitCats.length > 0 && <optgroup label="Charges by category">{debitCats.map((c) => <option key={"d" + c} value={"debit|" + c}>{c}</option>)}</optgroup>}
+              {creditCats.length > 0 && <optgroup label="Payments by category">{creditCats.map((c) => <option key={"c" + c} value={"credit|" + c}>{c}</option>)}</optgroup>}
+            </select>
+            {filterInfo && <button onClick={() => setFilter("all")} className="text-xs font-semibold" style={{ color: C.inkSoft }}>Clear filter</button>}
+          </div>
+        )}
+        {filterInfo && (
+          <div className="rounded-xl p-3 mb-4 flex items-center justify-between flex-wrap gap-2" style={{ background: filterInfo.direction === "debit" ? C.debitTint : C.creditTint }}>
+            <span className="text-sm font-semibold" style={{ color: filterInfo.direction === "debit" ? C.debit : C.credit }}>{filterInfo.label} · {filterInfo.rows.length} {filterInfo.rows.length === 1 ? "entry" : "entries"}</span>
+            <span><span className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.inkSoft, marginRight: 8 }}>Total</span><span className="text-lg font-black" style={{ color: filterInfo.direction === "debit" ? C.debit : C.credit, fontVariantNumeric: "tabular-nums" }}>{fmtMoney(filterInfo.total)}</span></span>
+          </div>
+        )}
+        {visibleRows.length === 0 ? <p className="text-sm text-center py-6" style={{ color: C.inkSoft }}>{filterInfo ? "No matching transactions." : isSeason ? "No activity yet this season." : "No activity this month."}</p> : (
           <div>
           <p className="scroll-hint items-center gap-1.5 text-xs font-semibold mb-2" style={{ color: C.inkSoft }}>↔ Swipe to see all columns</p>
           <div className="table-scroll">
           <table className="w-full text-sm">
-            <thead><tr className="text-left" style={{ color: C.inkSoft }}><th className="font-semibold pb-2">Date</th><th className="font-semibold pb-2">Category</th><th className="font-semibold pb-2">Description</th><th className="font-semibold pb-2 text-right">Debit</th><th className="font-semibold pb-2 text-right">Credit</th><th className="font-semibold pb-2 text-right">Balance</th></tr></thead>
-            <tbody>{stats.rows.map((t) => (
+            <thead><tr className="text-left" style={{ color: C.inkSoft }}><th className="font-semibold pb-2">Date</th><th className="font-semibold pb-2">Category</th><th className="font-semibold pb-2">Description</th><th className="font-semibold pb-2 text-right">Debit</th><th className="font-semibold pb-2 text-right">Credit</th>{!filterInfo && <th className="font-semibold pb-2 text-right">Balance</th>}</tr></thead>
+            <tbody>{visibleRows.map((t) => (
               <tr key={t.id} className="border-t" style={{ borderColor: C.lineSoft }}>
                 <td className="py-2" style={{ color: C.ink }}>{t.date}</td><td className="py-2" style={{ color: C.ink }}>{t.category}</td><td className="py-2" style={{ color: C.inkSoft }}>{t.description || "—"}</td>
                 <td className="py-2 text-right font-semibold" style={{ color: C.debit }}>{t.direction === "debit" ? fmtMoney(t.amount) : ""}</td>
                 <td className="py-2 text-right font-semibold" style={{ color: C.credit }}>{t.direction === "credit" ? fmtMoney(t.amount) : ""}</td>
-                <td className="py-2 text-right font-bold" style={{ color: C.ink, fontVariantNumeric: "tabular-nums" }}>{fmtMoney(t.running)}</td>
+                {!filterInfo && <td className="py-2 text-right font-bold" style={{ color: C.ink, fontVariantNumeric: "tabular-nums" }}>{fmtMoney(t.running)}</td>}
               </tr>
             ))}</tbody>
           </table>
