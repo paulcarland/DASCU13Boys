@@ -84,6 +84,12 @@
   @media (min-width:1024px){
     .lg\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
   }
+  /* iPhones zoom the whole page in when you tap a field whose text is smaller than 16px, and stay zoomed afterwards.
+     On phone-sized screens, make every field's text 16px so that never happens. */
+  html { -webkit-text-size-adjust: 100%; }
+  @media (max-width:640px){
+    input, select, textarea { font-size: 16px !important; }
+  }
 </style>
 </head>
 <body>
